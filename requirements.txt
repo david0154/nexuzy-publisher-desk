@@ -1,14 +1,16 @@
 # Nexuzy Publisher Desk - Python Dependencies
 # Updated with GGUF model support for maximum size reduction
+# NOTE: Install llama-cpp-python separately with pre-built wheel (see SETUP.md)
 
 # Core dependencies
 transformers>=4.36.0
 sentence-transformers>=2.2.2
 
-# GGUF model support (CPU-optimized, smallest format)
-llama-cpp-python>=0.2.27
+# GGUF model support - INSTALL SEPARATELY WITH PRE-BUILT WHEEL:
+# pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# llama-cpp-python>=0.2.27
 
-# For translation (will use GGUF if available, else fallback)
+# For translation and embeddings
 torch>=2.1.0
 
 # HuggingFace model downloads
