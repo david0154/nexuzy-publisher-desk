@@ -2,32 +2,32 @@
 # Updated with GGUF model support for maximum size reduction
 
 # Core dependencies
-transformers==4.36.0
-sentence-transformers==2.2.2
+transformers>=4.36.0
+sentence-transformers>=2.2.2
 
 # GGUF model support (CPU-optimized, smallest format)
-llama-cpp-python==0.2.27
+llama-cpp-python>=0.2.27
 
 # For translation (will use GGUF if available, else fallback)
-torch==2.1.1
+torch>=2.1.0
 
 # HuggingFace model downloads
-huggingface_hub==0.19.4
+huggingface_hub>=0.19.4
 
 # RSS & Web
-feedparser==6.0.10
-requests==2.31.0
-beautifulsoup4==4.12.2
-lxml==4.9.3
+feedparser>=6.0.10
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
 
 # UI
-pillow==10.1.0
+pillow>=10.1.0
 
 # Database (sqlite3 is built-in)
 
 # Build
-pyinstaller==6.1.0
+pyinstaller>=6.1.0
 
 # Utilities
-python-dotenv==1.0.0
-colorama==0.4.6
+python-dotenv>=1.0.0
+colorama>=0.4.6
