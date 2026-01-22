@@ -1,0 +1,23 @@
+# Nexuzy Publisher Desk - Python Dependencies
+
+# Core dependencies
+transformers==4.36.0
+torch==2.1.1
+sentence-transformers==2.2.2
+feedparser==6.0.10
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# UI
+pillow==10.1.0
+
+# Database
+# sqlite3 is built-in
+
+# Build
+pyinstaller==6.1.0
+
+# Utilities
+python-dotenv==1.0.0
+colorama==0.4.6
