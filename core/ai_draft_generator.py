@@ -1,6 +1,6 @@
 """
 AI Draft Generation Module
-Generates news articles using Mistral-7B-GGUF (quantized Q4_K_M, 4.1GB)
+Generates news articles using Transformers pipeline (pure Python, no C++ needed)
 """
 
 import sqlite3
@@ -11,46 +11,62 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class DraftGenerator:
-    """Generate AI-assisted news drafts using GGUF quantized model"""
+    """Generate AI-assisted news drafts using pure Python transformers pipeline"""
     
-    def __init__(self, db_path: str, model_name: str = 'TheBloke/Mistral-7B-Instruct-v0.2-GGUF'):
+    def __init__(self, db_path: str, model_name: str = 'mistralai/Mistral-7B-Instruct-v0.1'):
         self.db_path = db_path
         self.model_name = model_name
-        self.model_file = 'mistral-7b-instruct-v0.2.Q4_K_M.gguf'
-        self.llm = self._load_model()
+        self.pipeline = self._load_model()
     
     def _load_model(self):
-        """Load GGUF quantized Mistral model (4.1GB with llama-cpp-python)"""
+        """Load Mistral model using transformers pipeline (pure Python)"""
         try:
-            from llama_cpp import Llama
+            from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+            import torch
             
-            logger.info(f"Loading GGUF model: {self.model_name}")
+            logger.info(f"Loading model: {self.model_name}")
             
-            # Construct model path
-            model_dir = Path('models') / self.model_name.replace('/', '_')
-            model_path = model_dir / self.model_file
+            # Check if GPU available
+            device = 0 if torch.cuda.is_available() else -1
+            device_name = "GPU" if device == 0 else "CPU"
             
-            if not model_path.exists():
-                logger.warning(f"Model not found at {model_path}, will use template generation")
-                return None
+            logger.info(f"Using device: {device_name}")
             
-            # Load GGUF model with llama-cpp-python
-            llm = Llama(
-                model_path=str(model_path),
-                n_ctx=4096,  # Context window
-                n_threads=4,  # CPU threads (adjust based on your CPU)
-                n_gpu_layers=0,  # 0 for CPU, increase if GPU available
-                verbose=False
+            # Load model and tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                cache_dir='models',
+                trust_remote_code=True
             )
             
-            logger.info("✓ Mistral-7B-GGUF Q4_K_M loaded (4.1GB, CPU-optimized)")
-            return llm
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                cache_dir='models',
+                trust_remote_code=True,
+                torch_dtype=torch.float16 if device == 0 else torch.float32,
+                low_cpu_mem_usage=True
+            )
+            
+            # Create pipeline
+            pipe = pipeline(
+                "text-generation",
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9
+            )
+            
+            logger.info(f"✓ {self.model_name} loaded (pure Python, no C++)")
+            return pipe
         
-        except ImportError:
-            logger.error("llama-cpp-python not installed. Install with: pip install llama-cpp-python")
+        except ImportError as e:
+            logger.error(f"Required library not installed: {e}")
             return None
         except Exception as e:
-            logger.error(f"Error loading GGUF model: {e}")
+            logger.error(f"Error loading model: {e}")
             return None
     
     def generate_draft(self, news_id: int) -> Dict:
@@ -87,25 +103,23 @@ class DraftGenerator:
             # Build prompt
             prompt = self._build_prompt(headline, summary, facts)
             
-            if not self.llm:
-                logger.warning("GGUF model not loaded, returning template draft")
+            if not self.pipeline:
+                logger.warning("Model not loaded, returning template draft")
                 return self._template_draft(headline, summary, facts)
             
-            # Generate with Mistral-GGUF
+            # Generate with transformers pipeline
             try:
-                output = self.llm(
+                outputs = self.pipeline(
                     prompt,
-                    max_tokens=512,
-                    temperature=0.7,
-                    top_p=0.9,
-                    stop=["</s>", "[/INST]"],
-                    echo=False
+                    max_new_tokens=512,
+                    num_return_sequences=1,
+                    pad_token_id=self.pipeline.tokenizer.eos_token_id
                 )
                 
-                generated_text = output['choices'][0]['text']
+                generated_text = outputs[0]['generated_text']
             
             except Exception as e:
-                logger.error(f"GGUF generation error: {e}")
+                logger.error(f"Generation error: {e}")
                 return self._template_draft(headline, summary, facts)
             
             # Parse output
@@ -121,7 +135,7 @@ class DraftGenerator:
             # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"Generated draft for news_id {news_id} using GGUF model")
+            logger.info(f"Generated draft for news_id {news_id} using transformers")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
@@ -130,7 +144,7 @@ class DraftGenerator:
     
     def _build_prompt(self, headline: str, summary: str, facts: List[tuple]) -> str:
         """
-        Build prompt for GGUF model
+        Build prompt for model
         Structured to guide neutral, fact-based generation
         """
         facts_str = "\n".join([f"- {fact_type}: {content}" for fact_type, content in facts])
@@ -156,8 +170,12 @@ Article: [/INST]"""
     
     def _parse_output(self, text: str, headline: str, summary: str) -> Dict:
         """Parse model output into structured draft"""
-        # Clean up generated text
-        body = text.strip()
+        # Extract article body (remove prompt)
+        if '[/INST]' in text:
+            parts = text.split('[/INST]')
+            body = parts[-1].strip() if len(parts) > 1 else text
+        else:
+            body = text
         
         # Generate headline suggestions
         headline_suggestions = [
@@ -175,7 +193,7 @@ Article: [/INST]"""
         }
     
     def _template_draft(self, headline: str, summary: str, facts: List[tuple]) -> Dict:
-        """Generate template draft when GGUF model unavailable"""
+        """Generate template draft when model unavailable"""
         body = f"""Breaking News: {headline}
 
 {summary}
