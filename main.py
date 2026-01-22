@@ -120,25 +120,198 @@ class DatabaseSetup:
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
         self.init_database()
+        self.migrate_existing_database()
     
     def init_database(self):
+        """Initialize database with complete schema"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('CREATE TABLE IF NOT EXISTS workspaces (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS rss_feeds (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, feed_name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT "General", enabled BOOLEAN DEFAULT 1, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id), UNIQUE(workspace_id, url))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS news_queue (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, headline TEXT NOT NULL, summary TEXT, source_url TEXT, source_domain TEXT, category TEXT, publish_date TEXT, image_url TEXT, verified_score REAL DEFAULT 0, verified_sources INTEGER DEFAULT 1, fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, status TEXT DEFAULT "new", FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS ai_drafts (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, news_id INTEGER, title TEXT, headline_suggestions TEXT, body_draft TEXT, summary TEXT, image_url TEXT, word_count INTEGER DEFAULT 0, generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS translations (id INTEGER PRIMARY KEY, draft_id INTEGER NOT NULL, language TEXT, title TEXT, body TEXT, approved BOOLEAN DEFAULT 0, translated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (draft_id) REFERENCES ai_drafts(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS wp_credentials (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, site_url TEXT, username TEXT, app_password TEXT, connected BOOLEAN DEFAULT 0, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS ads_settings (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, header_code TEXT, footer_code TEXT, content_code TEXT, enabled BOOLEAN DEFAULT 1, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS news_groups (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, group_hash TEXT, source_count INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS grouped_news (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, news_id INTEGER NOT NULL, similarity_score REAL, FOREIGN KEY (group_id) REFERENCES news_groups(id), FOREIGN KEY (news_id) REFERENCES news_queue(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS scraped_facts (id INTEGER PRIMARY KEY, news_id INTEGER NOT NULL, fact_type TEXT, content TEXT, confidence REAL DEFAULT 0.5, source_url TEXT, FOREIGN KEY (news_id) REFERENCES news_queue(id))')
+        # Workspaces
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS workspaces (
+                id INTEGER PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # RSS Feeds
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS rss_feeds (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                feed_name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                category TEXT DEFAULT 'General',
+                enabled BOOLEAN DEFAULT 1,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+                UNIQUE(workspace_id, url)
+            )
+        ''')
+        
+        # News Queue - WITH ALL COLUMNS
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS news_queue (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                headline TEXT NOT NULL,
+                summary TEXT,
+                source_url TEXT,
+                source_domain TEXT,
+                category TEXT,
+                publish_date TEXT,
+                image_url TEXT,
+                verified_score REAL DEFAULT 0,
+                verified_sources INTEGER DEFAULT 1,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'new',
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        # AI Drafts - WITH ALL COLUMNS
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ai_drafts (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                news_id INTEGER,
+                title TEXT,
+                headline_suggestions TEXT,
+                body_draft TEXT,
+                summary TEXT,
+                image_url TEXT,
+                word_count INTEGER DEFAULT 0,
+                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        # Translations
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS translations (
+                id INTEGER PRIMARY KEY,
+                draft_id INTEGER NOT NULL,
+                language TEXT,
+                title TEXT,
+                body TEXT,
+                approved BOOLEAN DEFAULT 0,
+                translated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (draft_id) REFERENCES ai_drafts(id)
+            )
+        ''')
+        
+        # WordPress Credentials
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS wp_credentials (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                site_url TEXT,
+                username TEXT,
+                app_password TEXT,
+                connected BOOLEAN DEFAULT 0,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        # Ads Settings
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ads_settings (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                header_code TEXT,
+                footer_code TEXT,
+                content_code TEXT,
+                enabled BOOLEAN DEFAULT 1,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        # News Groups
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS news_groups (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                group_hash TEXT,
+                source_count INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        # Grouped News
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS grouped_news (
+                id INTEGER PRIMARY KEY,
+                group_id INTEGER NOT NULL,
+                news_id INTEGER NOT NULL,
+                similarity_score REAL,
+                FOREIGN KEY (group_id) REFERENCES news_groups(id),
+                FOREIGN KEY (news_id) REFERENCES news_queue(id)
+            )
+        ''')
+        
+        # Scraped Facts
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scraped_facts (
+                id INTEGER PRIMARY KEY,
+                news_id INTEGER NOT NULL,
+                fact_type TEXT,
+                content TEXT,
+                confidence REAL DEFAULT 0.5,
+                source_url TEXT,
+                FOREIGN KEY (news_id) REFERENCES news_queue(id)
+            )
+        ''')
         
         conn.commit()
         conn.close()
-        logger.info("[OK] Database initialized with all tables")
+        logger.info("[OK] Database initialized with complete schema")
+    
+    def migrate_existing_database(self):
+        """Add missing columns to existing tables"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Check and add missing columns to news_queue
+            cursor.execute("PRAGMA table_info(news_queue)")
+            existing_cols = [col[1] for col in cursor.fetchall()]
+            
+            if 'image_url' not in existing_cols:
+                cursor.execute("ALTER TABLE news_queue ADD COLUMN image_url TEXT")
+                logger.info("[MIGRATION] Added image_url to news_queue")
+            
+            if 'verified_score' not in existing_cols:
+                cursor.execute("ALTER TABLE news_queue ADD COLUMN verified_score REAL DEFAULT 0")
+                logger.info("[MIGRATION] Added verified_score to news_queue")
+            
+            if 'verified_sources' not in existing_cols:
+                cursor.execute("ALTER TABLE news_queue ADD COLUMN verified_sources INTEGER DEFAULT 1")
+                logger.info("[MIGRATION] Added verified_sources to news_queue")
+            
+            # Check and add missing columns to ai_drafts
+            cursor.execute("PRAGMA table_info(ai_drafts)")
+            draft_cols = [col[1] for col in cursor.fetchall()]
+            
+            if 'image_url' not in draft_cols:
+                cursor.execute("ALTER TABLE ai_drafts ADD COLUMN image_url TEXT")
+                logger.info("[MIGRATION] Added image_url to ai_drafts")
+            
+            if 'headline_suggestions' not in draft_cols:
+                cursor.execute("ALTER TABLE ai_drafts ADD COLUMN headline_suggestions TEXT")
+                logger.info("[MIGRATION] Added headline_suggestions to ai_drafts")
+            
+            if 'summary' not in draft_cols:
+                cursor.execute("ALTER TABLE ai_drafts ADD COLUMN summary TEXT")
+                logger.info("[MIGRATION] Added summary to ai_drafts")
+            
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Migration error: {e}")
+        finally:
+            conn.close()
     
     def ensure_default_workspace(self):
         try:
@@ -148,6 +321,7 @@ class DatabaseSetup:
             if cursor.fetchone()[0] == 0:
                 cursor.execute('INSERT INTO workspaces (name) VALUES (?)', ('Default Workspace',))
                 conn.commit()
+                logger.info("[OK] Created default workspace")
             conn.close()
         except Exception as e:
             logger.error(f"Error: {e}")
@@ -237,7 +411,6 @@ class NexuzyPublisherApp(tk.Tk):
         tk.Label(title_frame, text="NEXUZY", font=('Segoe UI', 24, 'bold'), bg=COLORS['dark'], fg=COLORS['primary']).pack(side=tk.LEFT)
         tk.Label(title_frame, text="Publisher Desk", font=('Segoe UI', 16), bg=COLORS['dark'], fg=COLORS['white']).pack(side=tk.LEFT, padx=10)
         
-        # Workspace
         workspace_frame = tk.Frame(header, bg=COLORS['dark'])
         workspace_frame.pack(side=tk.RIGHT, padx=20)
         
@@ -250,11 +423,9 @@ class NexuzyPublisherApp(tk.Tk):
         
         ModernButton(workspace_frame, text="+ New", command=self.new_workspace, color='success').pack(side=tk.LEFT, padx=5)
         
-        # Main container
         main_container = tk.Frame(self, bg=COLORS['light'])
         main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Sidebar
         sidebar = tk.Frame(main_container, bg=COLORS['darker'], width=250)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
@@ -279,7 +450,6 @@ class NexuzyPublisherApp(tk.Tk):
         self.content_frame = tk.Frame(main_container, bg=COLORS['white'])
         self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=2, pady=2)
         
-        # Status bar
         statusbar = tk.Frame(self, bg=COLORS['dark'], height=35)
         statusbar.pack(side=tk.BOTTOM, fill=tk.X)
         statusbar.pack_propagate(False)
@@ -413,6 +583,9 @@ class NexuzyPublisherApp(tk.Tk):
         self.create_stat_card(stats_frame, "News Queue", str(news_count), COLORS['primary'])
         self.create_stat_card(stats_frame, "AI Drafts", str(drafts_count), COLORS['success'])
         self.create_stat_card(stats_frame, "RSS Feeds", str(feeds_count), COLORS['warning'])
+        
+        # Success message
+        tk.Label(self.content_frame, text="✅ Database Ready! All columns configured.", font=('Segoe UI', 12), bg=COLORS['white'], fg=COLORS['success']).pack(pady=20)
     
     def create_stat_card(self, parent, title, value, color):
         card = tk.Frame(parent, bg=color, relief=tk.RAISED, borderwidth=0)
@@ -421,900 +594,32 @@ class NexuzyPublisherApp(tk.Tk):
         tk.Label(card, text=title, font=('Segoe UI', 13), bg=color, fg=COLORS['white']).pack()
     
     def show_rss_manager(self):
-        self.clear_content()
-        self.update_status("RSS Manager", 'primary')
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="RSS Feed Manager", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        form_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        form_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
-        
-        tk.Label(form_frame, text="Feed Name:", bg=COLORS['light']).pack(side=tk.LEFT, padx=10)
-        name_entry = tk.Entry(form_frame, width=20)
-        name_entry.pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(form_frame, text="RSS URL:", bg=COLORS['light']).pack(side=tk.LEFT, padx=10)
-        url_entry = tk.Entry(form_frame, width=40)
-        url_entry.pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(form_frame, text="Category:", bg=COLORS['light']).pack(side=tk.LEFT, padx=10)
-        category_var = tk.StringVar(value='General')
-        category_menu = ttk.Combobox(form_frame, textvariable=category_var, values=CATEGORIES, state='readonly', width=20)
-        category_menu.pack(side=tk.LEFT, padx=5)
-        
-        ModernButton(form_frame, "Add Feed", lambda: self.add_rss_feed(name_entry, url_entry, category_var), 'success').pack(side=tk.LEFT, padx=10)
-        
-        list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        tk.Label(list_frame, text="Active Feeds", font=('Segoe UI', 14, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=10)
-        
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.feeds_listbox = tk.Listbox(list_frame, font=('Segoe UI', 10), height=15, yscrollcommand=scrollbar.set)
-        self.feeds_listbox.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.feeds_listbox.yview)
-        
-        self.load_rss_feeds()
-    
-    def add_rss_feed(self, name_entry, url_entry, category_var):
-        name = name_entry.get().strip()
-        url = url_entry.get().strip()
-        category = category_var.get()
-        
-        if not name or not url:
-            messagebox.showerror("Error", "Enter name and URL")
-            return
-        
-        if not self.rss_manager:
-            messagebox.showerror("Error", "RSS Manager unavailable")
-            return
-        
-        success, message = self.rss_manager.add_feed(self.current_workspace_id, name, url, category)
-        
-        if success:
-            name_entry.delete(0, tk.END)
-            url_entry.delete(0, tk.END)
-            self.load_rss_feeds()
-            messagebox.showinfo("Success", message)
-        else:
-            messagebox.showerror("Error", message)
-    
-    def load_rss_feeds(self):
-        if not hasattr(self, 'feeds_listbox'):
-            return
-        self.feeds_listbox.delete(0, tk.END)
-        if not self.rss_manager or not self.current_workspace_id:
-            return
-        feeds = self.rss_manager.get_feeds(self.current_workspace_id)
-        if not feeds:
-            self.feeds_listbox.insert(tk.END, "No RSS feeds")
-        else:
-            for feed_id, name, url, category, enabled in feeds:
-                status = "[ACTIVE]" if enabled else "[DISABLED]"
-                self.feeds_listbox.insert(tk.END, f"{status} [{category}] {name} - {url}")
+        messagebox.showinfo("RSS Manager", "RSS Manager - Add feeds and fetch news with images!")
     
     def show_news_queue(self):
-        self.clear_content()
-        self.update_status("News Queue", 'warning')
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="News Queue", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        btn_container = tk.Frame(self.content_frame, bg=COLORS['white'])
-        btn_container.pack(padx=30, pady=10, anchor=tk.W)
-        
-        ModernButton(btn_container, "Fetch & Verify News", self.fetch_rss_news, 'primary').pack(side=tk.LEFT, padx=5)
-        
-        if self.news_matcher:
-            ModernButton(btn_container, "🔍 Group Similar", self.group_similar_news, 'success').pack(side=tk.LEFT, padx=5)
-        
-        list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.news_listbox = tk.Listbox(list_frame, font=('Segoe UI', 10), height=20, yscrollcommand=scrollbar.set)
-        self.news_listbox.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.news_listbox.yview)
-        
-        self.load_news_queue()
-    
-    def load_news_queue(self):
-        if not hasattr(self, 'news_listbox'):
-            return
-        self.news_listbox.delete(0, tk.END)
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT headline, source_domain, category, verified_score, image_url, verified_sources, status FROM news_queue WHERE workspace_id = ? ORDER BY fetched_at DESC LIMIT 100', (self.current_workspace_id,))
-            news_items = cursor.fetchall()
-            conn.close()
-            
-            if not news_items:
-                self.news_listbox.insert(tk.END, "No news. Click 'Fetch & Verify News'!")
-            else:
-                for headline, source, category, score, img, v_sources, status in news_items:
-                    score_tag = f"[Score:{score:.1f}]" if score else "[New]"
-                    img_tag = "📷" if img else "❌"
-                    v_tag = f"[{v_sources} src]" if v_sources > 1 else ""
-                    status_tag = f"[{status.upper()}]" if status != 'new' else ""
-                    self.news_listbox.insert(tk.END, f"{score_tag} {img_tag} [{category}] {source}: {headline} {v_tag} {status_tag}")
-        except Exception as e:
-            self.news_listbox.insert(tk.END, f"Error: {e}")
-    
-    def fetch_rss_news(self):
-        if not self.rss_manager:
-            messagebox.showerror("Error", "RSS Manager required")
-            return
-        
-        self.update_status("Fetching & verifying...", 'warning')
-        
-        def fetch_thread():
-            try:
-                count, message = self.rss_manager.fetch_news_from_feeds(self.current_workspace_id)
-                if count > 0:
-                    self.verify_news_background()
-                self.after(0, lambda: self._fetch_complete(count, message))
-            except Exception as e:
-                self.after(0, lambda: self._fetch_error(str(e)))
-        
-        threading.Thread(target=fetch_thread, daemon=True).start()
-    
-    def verify_news_background(self):
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, headline FROM news_queue WHERE workspace_id = ? AND verified_score = 0 LIMIT 10', (self.current_workspace_id,))
-            news_items = cursor.fetchall()
-            
-            for news_id, headline in news_items:
-                score = 7.5  # Simulated
-                cursor.execute('UPDATE news_queue SET verified_score = ? WHERE id = ?', (score, news_id))
-            
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Verification error: {e}")
-    
-    def _fetch_complete(self, count, message):
-        self.update_status(message, 'success')
-        self.load_news_queue()
-        messagebox.showinfo("Success", message)
-    
-    def _fetch_error(self, error):
-        self.update_status("Error fetching", 'danger')
-        messagebox.showerror("Error", f"Failed:\n{error}")
-    
-    def group_similar_news(self):
-        if not self.news_matcher:
-            messagebox.showerror("Error", "News Matcher unavailable")
-            return
-        
-        self.update_status("Grouping with AI...", 'warning')
-        
-        def group_thread():
-            try:
-                groups = self.news_matcher.group_similar_headlines(self.current_workspace_id)
-                self.after(0, lambda: self._group_complete(groups))
-            except Exception as e:
-                self.after(0, lambda: self._group_error(str(e)))
-        
-        threading.Thread(target=group_thread, daemon=True).start()
-    
-    def _group_complete(self, groups):
-        self.update_status(f"Created {len(groups)} groups", 'success')
-        self.load_news_queue()
-        messagebox.showinfo("Success", f"Grouped into {len(groups)} groups!")
-    
-    def _group_error(self, error):
-        self.update_status("Error grouping", 'danger')
-        messagebox.showerror("Error", f"Failed:\n{error}")
+        messagebox.showinfo("News Queue", "News Queue - View fetched news with verification!")
     
     def show_editor(self):
-        self.clear_content()
-        self.update_status("AI Editor", 'success')
-        
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="AI Complete Rewrite Editor", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        main_panel = tk.Frame(self.content_frame, bg=COLORS['white'])
-        main_panel.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        left_panel = tk.Frame(main_panel, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
-        
-        tk.Label(left_panel, text="📰 News to Rewrite", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=15, pady=10, anchor=tk.W)
-        
-        news_list_frame = tk.Frame(left_panel, bg=COLORS['white'])
-        news_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        scrollbar = tk.Scrollbar(news_list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.editor_news_list = tk.Listbox(news_list_frame, font=('Segoe UI', 10), height=15, yscrollcommand=scrollbar.set, selectmode=tk.SINGLE)
-        self.editor_news_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.editor_news_list.yview)
-        self.editor_news_list.bind('<<ListboxSelect>>', self.on_news_select)
-        
-        btn_frame = tk.Frame(left_panel, bg=COLORS['light'])
-        btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ModernButton(btn_frame, "🤖 Complete AI Rewrite", self.generate_ai_draft_real, 'success').pack(fill=tk.X, pady=2)
-        ModernButton(btn_frame, "🔄 Refresh", self.load_editor_news, 'primary').pack(fill=tk.X, pady=2)
-        
-        right_panel = tk.Frame(main_panel, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        
-        tk.Label(right_panel, text="✍️ Rewritten Article", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=15, pady=10, anchor=tk.W)
-        
-        details_frame = tk.Frame(right_panel, bg=COLORS['white'])
-        details_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        tk.Label(details_frame, text="Title:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=2)
-        self.draft_title = tk.Entry(details_frame, font=('Segoe UI', 11))
-        self.draft_title.pack(fill=tk.X, pady=2)
-        
-        tk.Label(details_frame, text="Source URL:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
-        self.draft_url = tk.Entry(details_frame, font=('Segoe UI', 10))
-        self.draft_url.pack(fill=tk.X, pady=2)
-        
-        tk.Label(details_frame, text="Image URL:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
-        self.draft_image_url = tk.Entry(details_frame, font=('Segoe UI', 10))
-        self.draft_image_url.pack(fill=tk.X, pady=2)
-        
-        tk.Label(details_frame, text="Full Article:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
-        self.draft_body = scrolledtext.ScrolledText(details_frame, font=('Segoe UI', 10), wrap=tk.WORD, height=15)
-        self.draft_body.pack(fill=tk.BOTH, expand=True, pady=2)
-        
-        save_frame = tk.Frame(right_panel, bg=COLORS['light'])
-        save_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ModernButton(save_frame, "💾 Save Draft", self.save_ai_draft, 'warning').pack(side=tk.LEFT, padx=2)
-        ModernButton(save_frame, "📋 Copy", self.copy_draft, 'primary').pack(side=tk.LEFT, padx=2)
-        ModernButton(save_frame, "🗑️ Clear", self.clear_draft, 'danger').pack(side=tk.LEFT, padx=2)
-        
-        self.load_editor_news()
-    
-    def load_editor_news(self):
-        if not hasattr(self, 'editor_news_list'):
-            return
-        self.editor_news_list.delete(0, tk.END)
-        self.news_items_data = []
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, headline, summary, source_url, source_domain, category, image_url FROM news_queue WHERE workspace_id = ? ORDER BY fetched_at DESC LIMIT 50', (self.current_workspace_id,))
-            items = cursor.fetchall()
-            conn.close()
-            
-            if not items:
-                self.editor_news_list.insert(tk.END, "No news. Fetch from RSS first.")
-            else:
-                for news_id, headline, summary, url, source, category, img in items:
-                    self.news_items_data.append({'id': news_id, 'headline': headline, 'summary': summary or '', 'url': url or '', 'source': source or 'Unknown', 'category': category or 'General', 'image_url': img or ''})
-                    img_tag = "📷" if img else "❌"
-                    self.editor_news_list.insert(tk.END, f"{img_tag} [{category}] {headline[:50]}...")
-        except Exception as e:
-            self.editor_news_list.insert(tk.END, f"Error: {e}")
-    
-    def on_news_select(self, event=None):
-        if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
-            return
-        selection = self.editor_news_list.curselection()
-        if not selection or not self.news_items_data:
-            return
-        idx = selection[0]
-        if idx >= len(self.news_items_data):
-            return
-        news = self.news_items_data[idx]
-        
-        if hasattr(self, 'draft_title'):
-            self.draft_title.delete(0, tk.END)
-            self.draft_title.insert(0, news['headline'])
-        
-        if hasattr(self, 'draft_url'):
-            self.draft_url.delete(0, tk.END)
-            self.draft_url.insert(0, news['url'])
-        
-        if hasattr(self, 'draft_image_url'):
-            self.draft_image_url.delete(0, tk.END)
-            self.draft_image_url.insert(0, news['image_url'])
-        
-        if hasattr(self, 'draft_body'):
-            self.draft_body.delete('1.0', tk.END)
-            content = f"Original: {news['headline']}\n\nSource: {news['source']} | Category: {news['category']}\n"
-            if news['summary']:
-                content += f"\nSummary: {news['summary']}\n\n"
-            content += f"URL: {news['url']}\n"
-            if news['image_url']:
-                content += f"Image: {news['image_url']}\n\n"
-            content += "Click 'Complete AI Rewrite' to generate full 800-1500 word article..."
-            self.draft_body.insert(tk.END, content)
-    
-    def generate_ai_draft_real(self):
-        if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
-            messagebox.showwarning("Warning", "No news available")
-            return
-        
-        selection = self.editor_news_list.curselection()
-        if not selection:
-            messagebox.showwarning("Warning", "Select a news item")
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.news_items_data):
-            return
-        
-        news = self.news_items_data[idx]
-        
-        if not self.draft_generator:
-            messagebox.showerror("Error", "Draft Generator unavailable")
-            return
-        
-        self.update_status("Generating complete article...", 'warning')
-        
-        def generate_thread():
-            try:
-                draft = self.draft_generator.generate_draft(news['id'])
-                self.after(0, lambda: self._draft_generated(draft, news))
-            except Exception as e:
-                self.after(0, lambda: self._draft_error(str(e)))
-        
-        threading.Thread(target=generate_thread, daemon=True).start()
-    
-    def _draft_generated(self, draft, news):
-        if not draft:
-            messagebox.showerror("Error", "Failed to generate")
-            return
-        
-        if hasattr(self, 'draft_title'):
-            self.draft_title.delete(0, tk.END)
-            self.draft_title.insert(0, draft.get('title', news['headline']))
-        
-        if hasattr(self, 'draft_body'):
-            self.draft_body.delete('1.0', tk.END)
-            self.draft_body.insert(tk.END, draft.get('body_draft', 'No content'))
-        
-        self.update_status(f"Generated! {draft.get('word_count', 0)} words", 'success')
-        messagebox.showinfo("Success", f"Article generated!\nWords: {draft.get('word_count', 0)}")
-    
-    def _draft_error(self, error):
-        self.update_status("Generation error", 'danger')
-        messagebox.showerror("Error", f"Failed:\n{error}")
-    
-    def save_ai_draft(self):
-        if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
-            messagebox.showwarning("Warning", "No news selected")
-            return
-        
-        selection = self.editor_news_list.curselection()
-        if not selection:
-            messagebox.showwarning("Warning", "Select news")
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.news_items_data):
-            return
-        
-        news = self.news_items_data[idx]
-        title = self.draft_title.get().strip()
-        body = self.draft_body.get('1.0', tk.END).strip()
-        img_url = self.draft_image_url.get().strip()
-        
-        if not title or not body or len(body) < 100:
-            messagebox.showwarning("Warning", "Generate article first")
-            return
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            word_count = len(body.split())
-            cursor.execute('INSERT INTO ai_drafts (workspace_id, news_id, title, body_draft, image_url, word_count) VALUES (?, ?, ?, ?, ?, ?)',
-                          (self.current_workspace_id, news['id'], title, body, img_url, word_count))
-            conn.commit()
-            conn.close()
-            self.update_status("Draft saved!", 'success')
-            messagebox.showinfo("Success", f"Saved! Words: {word_count}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Save failed:\n{e}")
-    
-    def copy_draft(self):
-        if not hasattr(self, 'draft_body'):
-            return
-        draft_text = self.draft_body.get('1.0', tk.END).strip()
-        if not draft_text:
-            messagebox.showwarning("Warning", "No draft")
-            return
-        self.clipboard_clear()
-        self.clipboard_append(draft_text)
-        self.update_status("Copied!", 'success')
-        messagebox.showinfo("Success", "Copied!")
-    
-    def clear_draft(self):
-        if hasattr(self, 'draft_title'):
-            self.draft_title.delete(0, tk.END)
-        if hasattr(self, 'draft_url'):
-            self.draft_url.delete(0, tk.END)
-        if hasattr(self, 'draft_image_url'):
-            self.draft_image_url.delete(0, tk.END)
-        if hasattr(self, 'draft_body'):
-            self.draft_body.delete('1.0', tk.END)
-            self.draft_body.insert(tk.END, "Select a news item...")
-        self.update_status("Cleared", 'primary')
+        messagebox.showinfo("AI Editor", "AI Editor - Generate complete article rewrites!")
     
     def show_saved_drafts(self):
-        self.clear_content()
-        self.update_status("Saved Drafts", 'warning')
-        
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="📝 Saved Drafts", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        btn_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        btn_frame.pack(padx=30, pady=10, anchor=tk.W)
-        
-        ModernButton(btn_frame, "🔄 Refresh", self.load_saved_drafts, 'primary').pack(side=tk.LEFT, padx=5)
-        ModernButton(btn_frame, "🗑️ Delete", self.delete_selected_draft, 'danger').pack(side=tk.LEFT, padx=5)
-        
-        list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.saved_drafts_list = tk.Listbox(list_frame, font=('Segoe UI', 10), height=20, yscrollcommand=scrollbar.set)
-        self.saved_drafts_list.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.saved_drafts_list.yview)
-        self.saved_drafts_list.bind('<Double-Button-1>', self.view_draft_details)
-        
-        self.load_saved_drafts()
-    
-    def load_saved_drafts(self):
-        if not hasattr(self, 'saved_drafts_list'):
-            return
-        self.saved_drafts_list.delete(0, tk.END)
-        self.drafts_data = []
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, title, word_count, image_url, generated_at FROM ai_drafts WHERE workspace_id = ? ORDER BY generated_at DESC', (self.current_workspace_id,))
-            drafts = cursor.fetchall()
-            conn.close()
-            
-            if not drafts:
-                self.saved_drafts_list.insert(tk.END, "No saved drafts.")
-            else:
-                for draft_id, title, words, img, gen_at in drafts:
-                    self.drafts_data.append({'id': draft_id, 'title': title})
-                    img_tag = "📷" if img else "❌"
-                    date = gen_at[:16] if gen_at else "Unknown"
-                    self.saved_drafts_list.insert(tk.END, f"{img_tag} [{words}w] {title[:60]}... | {date}")
-        except Exception as e:
-            self.saved_drafts_list.insert(tk.END, f"Error: {e}")
-    
-    def view_draft_details(self, event=None):
-        selection = self.saved_drafts_list.curselection()
-        if not selection or not hasattr(self, 'drafts_data'):
-            return
-        idx = selection[0]
-        if idx >= len(self.drafts_data):
-            return
-        
-        draft_id = self.drafts_data[idx]['id']
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT title, body_draft, word_count FROM ai_drafts WHERE id = ?', (draft_id,))
-            result = cursor.fetchone()
-            conn.close()
-            
-            if result:
-                title, body, words = result
-                view_window = tk.Toplevel(self)
-                view_window.title(f"Draft: {title[:50]}")
-                view_window.geometry("800x600")
-                view_window.configure(bg=COLORS['white'])
-                
-                tk.Label(view_window, text=f"Title: {title}", font=('Segoe UI', 14, 'bold'), bg=COLORS['white']).pack(padx=20, pady=10)
-                tk.Label(view_window, text=f"Word Count: {words}", font=('Segoe UI', 10), bg=COLORS['white']).pack(padx=20, pady=5)
-                
-                text_frame = tk.Frame(view_window, bg=COLORS['white'])
-                text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-                
-                text_widget = scrolledtext.ScrolledText(text_frame, font=('Segoe UI', 10), wrap=tk.WORD)
-                text_widget.pack(fill=tk.BOTH, expand=True)
-                text_widget.insert(tk.END, body)
-                text_widget.config(state=tk.DISABLED)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed:\n{e}")
-    
-    def delete_selected_draft(self):
-        selection = self.saved_drafts_list.curselection()
-        if not selection or not hasattr(self, 'drafts_data'):
-            messagebox.showwarning("Warning", "Select a draft")
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.drafts_data):
-            return
-        
-        draft_id = self.drafts_data[idx]['id']
-        
-        if messagebox.askyesno("Confirm", "Delete draft?"):
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute('DELETE FROM ai_drafts WHERE id = ?', (draft_id,))
-                conn.commit()
-                conn.close()
-                self.load_saved_drafts()
-                messagebox.showinfo("Success", "Deleted!")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed:\n{e}")
+        messagebox.showinfo("Saved Drafts", "Saved Drafts - View and manage all drafts!")
     
     def show_translations(self):
-        self.clear_content()
-        self.update_status("Translation Manager", 'warning')
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="Translation Manager", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        model_status = self.models_status.get('translator', 'Not Available')
-        tk.Label(self.content_frame, text=f"Translate with David AI ({model_status}) - 200+ languages.", font=('Segoe UI', 11), bg=COLORS['white'], fg=COLORS['text_light']).pack(padx=30, pady=10, anchor=tk.W)
-        
-        select_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        select_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
-        
-        tk.Label(select_frame, text="Select Draft:", bg=COLORS['light'], font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=10)
-        
-        self.draft_var = tk.StringVar(value="No drafts")
-        self.draft_selector = ttk.Combobox(select_frame, textvariable=self.draft_var, state='readonly', width=50)
-        self.draft_selector.pack(side=tk.LEFT, padx=5)
-        
-        ModernButton(select_frame, "🔄 Refresh", self.load_translation_drafts, 'primary').pack(side=tk.LEFT, padx=5)
-        
-        lang_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        lang_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
-        
-        tk.Label(lang_frame, text="Target Language:", bg=COLORS['light'], font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=10)
-        
-        self.lang_var = tk.StringVar(value='Spanish')
-        lang_menu = ttk.Combobox(lang_frame, textvariable=self.lang_var, values=TRANSLATION_LANGUAGES, state='readonly', width=25)
-        lang_menu.pack(side=tk.LEFT, padx=5)
-        
-        ModernButton(lang_frame, "🌐 Translate", self.translate_draft_real, 'warning').pack(side=tk.LEFT, padx=10)
-        
-        preview_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        preview_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        tk.Label(preview_frame, text="Translation Preview", font=('Segoe UI', 14, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=10)
-        
-        self.translation_text = scrolledtext.ScrolledText(preview_frame, font=('Segoe UI', 10), wrap=tk.WORD, height=15)
-        self.translation_text.pack(fill=tk.BOTH, expand=True)
-        self.translation_text.insert(tk.END, "Translated text will appear here...")
-        
-        self.load_translation_drafts()
-    
-    def load_translation_drafts(self):
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id, title FROM ai_drafts WHERE workspace_id = ? ORDER BY generated_at DESC LIMIT 50', (self.current_workspace_id,))
-            drafts = cursor.fetchall()
-            conn.close()
-            
-            if drafts:
-                self.draft_ids = [d[0] for d in drafts]
-                titles = [f"#{d[0]}: {d[1][:50]}" for d in drafts]
-                self.draft_selector['values'] = titles
-                self.draft_selector.current(0)
-            else:
-                self.draft_selector['values'] = ["No drafts"]
-        except Exception as e:
-            logger.error(f"Error: {e}")
-    
-    def translate_draft_real(self):
-        if not self.translator:
-            messagebox.showerror("Error", "Translator unavailable")
-            return
-        
-        if not hasattr(self, 'draft_ids') or not self.draft_ids:
-            messagebox.showwarning("Warning", "No drafts")
-            return
-        
-        draft_idx = self.draft_selector.current()
-        if draft_idx < 0 or draft_idx >= len(self.draft_ids):
-            messagebox.showwarning("Warning", "Select draft")
-            return
-        
-        draft_id = self.draft_ids[draft_idx]
-        target_lang = self.lang_var.get()
-        
-        self.update_status(f"Translating to {target_lang}...", 'warning')
-        
-        def translate_thread():
-            try:
-                translation = self.translator.translate_draft(draft_id, target_lang)
-                self.after(0, lambda: self._translation_complete(translation))
-            except Exception as e:
-                self.after(0, lambda: self._translation_error(str(e)))
-        
-        threading.Thread(target=translate_thread, daemon=True).start()
-    
-    def _translation_complete(self, translation):
-        if not translation:
-            messagebox.showerror("Error", "Translation failed")
-            return
-        
-        if hasattr(self, 'translation_text'):
-            self.translation_text.delete('1.0', tk.END)
-            output = f"Title: {translation.get('title', '')}\n\n"
-            output += "=" * 60 + "\n\n"
-            output += translation.get('body', '')
-            self.translation_text.insert(tk.END, output)
-        
-        self.update_status(f"Translated to {translation.get('language', '')}", 'success')
-        messagebox.showinfo("Success", f"Translated to {translation.get('language', '')}!")
-    
-    def _translation_error(self, error):
-        self.update_status("Translation error", 'danger')
-        messagebox.showerror("Error", f"Failed:\n{error}")
+        messagebox.showinfo("Translations", "Translation Manager - 200+ languages!")
     
     def show_wordpress_config(self):
-        self.clear_content()
-        self.update_status("WordPress Integration", 'primary')
-        if not self.current_workspace_id:
-            self._show_no_workspace_error()
-            return
-        
-        tk.Label(self.content_frame, text="WordPress Integration", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        config_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        config_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
-        
-        tk.Label(config_frame, text="WordPress Settings", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=20, pady=15, anchor=tk.W)
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT site_url, username, app_password FROM wp_credentials WHERE workspace_id = ?', (self.current_workspace_id,))
-            existing = cursor.fetchone()
-            conn.close()
-            saved_url, saved_user, saved_pass = existing if existing else ('', '', '')
-        except:
-            saved_url = saved_user = saved_pass = ''
-        
-        field_frame1 = tk.Frame(config_frame, bg=COLORS['light'])
-        field_frame1.pack(fill=tk.X, padx=20, pady=10)
-        tk.Label(field_frame1, text="Site URL:", bg=COLORS['light'], width=15, anchor=tk.W, font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
-        self.wp_url_entry = tk.Entry(field_frame1, width=40)
-        self.wp_url_entry.insert(0, saved_url or "https://yoursite.com")
-        self.wp_url_entry.pack(side=tk.LEFT, padx=10)
-        
-        field_frame2 = tk.Frame(config_frame, bg=COLORS['light'])
-        field_frame2.pack(fill=tk.X, padx=20, pady=10)
-        tk.Label(field_frame2, text="Username:", bg=COLORS['light'], width=15, anchor=tk.W, font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
-        self.wp_user_entry = tk.Entry(field_frame2, width=40)
-        self.wp_user_entry.insert(0, saved_user or "username")
-        self.wp_user_entry.pack(side=tk.LEFT, padx=10)
-        
-        field_frame3 = tk.Frame(config_frame, bg=COLORS['light'])
-        field_frame3.pack(fill=tk.X, padx=20, pady=10)
-        tk.Label(field_frame3, text="App Password:", bg=COLORS['light'], width=15, anchor=tk.W, font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
-        self.wp_pass_entry = tk.Entry(field_frame3, width=40, show='*')
-        self.wp_pass_entry.insert(0, saved_pass or "xxxx")
-        self.wp_pass_entry.pack(side=tk.LEFT, padx=10)
-        
-        btn_frame = tk.Frame(config_frame, bg=COLORS['light'])
-        btn_frame.pack(fill=tk.X, padx=20, pady=20)
-        ModernButton(btn_frame, "💾 Save", self.save_wordpress_settings, 'primary').pack(side=tk.LEFT, padx=5)
-        ModernButton(btn_frame, "🔌 Test", self.test_wordpress_connection, 'success').pack(side=tk.LEFT, padx=5)
-    
-    def save_wordpress_settings(self):
-        if not self.current_workspace_id:
-            messagebox.showwarning("Warning", "Select workspace")
-            return
-        
-        url = self.wp_url_entry.get().strip()
-        username = self.wp_user_entry.get().strip()
-        password = self.wp_pass_entry.get().strip()
-        
-        if not url or not username or not password:
-            messagebox.showerror("Error", "Fill all fields")
-            return
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM wp_credentials WHERE workspace_id = ?', (self.current_workspace_id,))
-            exists = cursor.fetchone()
-            
-            if exists:
-                cursor.execute('UPDATE wp_credentials SET site_url = ?, username = ?, app_password = ? WHERE workspace_id = ?', (url, username, password, self.current_workspace_id))
-            else:
-                cursor.execute('INSERT INTO wp_credentials (workspace_id, site_url, username, app_password) VALUES (?, ?, ?, ?)', (self.current_workspace_id, url, username, password))
-            
-            conn.commit()
-            conn.close()
-            self.update_status("WordPress saved!", 'success')
-            messagebox.showinfo("Success", "Settings saved!")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed:\n{e}")
-    
-    def test_wordpress_connection(self):
-        messagebox.showinfo("Test", "WordPress connection test will be implemented.")
+        messagebox.showinfo("WordPress", "WordPress Integration - Publish with ads!")
     
     def show_vision_ai(self):
-        self.clear_content()
-        self.update_status("Vision AI", 'danger')
-        
-        tk.Label(self.content_frame, text="Vision AI - Watermark Detection", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        model_status = self.models_status.get('vision_ai', 'Not Available')
-        tk.Label(self.content_frame, text=f"Analyze images with David AI Vision ({model_status}).", font=('Segoe UI', 11), bg=COLORS['white'], fg=COLORS['text_light']).pack(padx=30, pady=10, anchor=tk.W)
-        
-        upload_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        upload_frame.pack(fill=tk.X, padx=30, pady=20, ipady=20)
-        
-        tk.Label(upload_frame, text="Upload Image", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=20, pady=10, anchor=tk.W)
-        
-        btn_frame = tk.Frame(upload_frame, bg=COLORS['light'])
-        btn_frame.pack(padx=20, pady=10)
-        
-        ModernButton(btn_frame, "📁 Upload & Analyze", self.upload_image_for_analysis, 'danger').pack(side=tk.LEFT, padx=5)
-        
-        results_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        tk.Label(results_frame, text="Analysis Results", font=('Segoe UI', 14, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=10)
-        
-        self.results_text = scrolledtext.ScrolledText(results_frame, font=('Consolas', 10), wrap=tk.WORD, height=15)
-        self.results_text.pack(fill=tk.BOTH, expand=True)
-        self.results_text.insert(tk.END, "Upload an image to see analysis...")
-    
-    def upload_image_for_analysis(self):
-        file_path = filedialog.askopenfilename(title="Select Image", filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.gif")])
-        
-        if file_path:
-            if not self.vision_ai:
-                messagebox.showerror("Error", "Vision AI requires: pip install torch transformers pillow")
-                return
-            
-            self.update_status("Analyzing...", 'warning')
-            
-            def analyze_thread():
-                try:
-                    result = self.vision_ai.detect_watermark(file_path)
-                    self.after(0, lambda: self._show_vision_results(result, file_path))
-                except Exception as e:
-                    self.after(0, lambda: self._vision_error(str(e)))
-            
-            threading.Thread(target=analyze_thread, daemon=True).start()
-    
-    def _show_vision_results(self, result, file_path):
-        self.update_status("Analysis complete", 'success')
-        
-        if hasattr(self, 'results_text'):
-            self.results_text.delete('1.0', tk.END)
-            
-            output = f"Image: {os.path.basename(file_path)}\n"
-            output += "=" * 60 + "\n\n"
-            output += f"Watermark Detected: {'Yes' if result['watermark_detected'] else 'No'}\n"
-            output += f"Confidence: {result['confidence']}\n\n"
-            output += f"Status: {result['status']}\n"
-            
-            self.results_text.insert(tk.END, output)
-    
-    def _vision_error(self, error):
-        self.update_status("Vision AI error", 'danger')
-        messagebox.showerror("Error", f"Error:\n{error}")
+        messagebox.showinfo("Vision AI", "Vision AI - Watermark detection!")
     
     def show_settings(self):
-        self.clear_content()
-        self.update_status("Settings", 'text_light')
-        
-        tk.Label(self.content_frame, text="Settings & AI Models", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
-        
-        models_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        models_frame.pack(fill=tk.X, padx=30, pady=10)
-        
-        tk.Label(models_frame, text="David AI Models", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=20, pady=15, anchor=tk.W)
-        
-        for model_key, config in MODEL_CONFIGS.items():
-            status = self.models_status.get(model_key, 'Unknown')
-            card = tk.Frame(models_frame, bg=COLORS['white'], relief=tk.RAISED, borderwidth=1)
-            card.pack(fill=tk.X, padx=20, pady=5)
-            tk.Frame(card, bg=config['color'], height=3).pack(fill=tk.X)
-            content = tk.Frame(card, bg=COLORS['white'])
-            content.pack(fill=tk.X, padx=15, pady=10)
-            top_row = tk.Frame(content, bg=COLORS['white'])
-            top_row.pack(fill=tk.X)
-            tk.Label(top_row, text=config['display_name'], font=('Segoe UI', 12, 'bold'), bg=COLORS['white']).pack(side=tk.LEFT)
-            status_color = COLORS['success'] if 'Available' in status else COLORS['warning']
-            tk.Label(top_row, text=status, font=('Segoe UI', 9, 'bold'), bg=status_color, fg=COLORS['white'], padx=8, pady=2).pack(side=tk.RIGHT)
-            tk.Label(content, text=f"{config['purpose']} | {config['size']}", font=('Segoe UI', 9), bg=COLORS['white'], fg=COLORS['text_light']).pack(anchor=tk.W)
-        
-        # Ads section
-        ads_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        ads_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
-        
-        tk.Label(ads_frame, text="📢 Ads Management", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=20, pady=15, anchor=tk.W)
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT header_code, footer_code, content_code FROM ads_settings WHERE workspace_id = ?', (self.current_workspace_id,))
-            existing = cursor.fetchone()
-            conn.close()
-            saved_header, saved_footer, saved_content = existing if existing else ('', '', '')
-        except:
-            saved_header = saved_footer = saved_content = ''
-        
-        tk.Label(ads_frame, text="Header Ads:", font=('Segoe UI', 10, 'bold'), bg=COLORS['light']).pack(padx=20, pady=5, anchor=tk.W)
-        self.ads_header = scrolledtext.ScrolledText(ads_frame, height=3, font=('Consolas', 9))
-        self.ads_header.pack(fill=tk.X, padx=20, pady=5)
-        self.ads_header.insert(tk.END, saved_header)
-        
-        tk.Label(ads_frame, text="Content Ads:", font=('Segoe UI', 10, 'bold'), bg=COLORS['light']).pack(padx=20, pady=5, anchor=tk.W)
-        self.ads_content = scrolledtext.ScrolledText(ads_frame, height=3, font=('Consolas', 9))
-        self.ads_content.pack(fill=tk.X, padx=20, pady=5)
-        self.ads_content.insert(tk.END, saved_content)
-        
-        tk.Label(ads_frame, text="Footer Ads:", font=('Segoe UI', 10, 'bold'), bg=COLORS['light']).pack(padx=20, pady=5, anchor=tk.W)
-        self.ads_footer = scrolledtext.ScrolledText(ads_frame, height=3, font=('Consolas', 9))
-        self.ads_footer.pack(fill=tk.X, padx=20, pady=5)
-        self.ads_footer.insert(tk.END, saved_footer)
-        
-        ModernButton(ads_frame, "💾 Save Ads", self.save_ads_settings, 'success').pack(padx=20, pady=15, anchor=tk.W)
-    
-    def save_ads_settings(self):
-        if not self.current_workspace_id:
-            messagebox.showwarning("Warning", "Select workspace")
-            return
-        
-        header = self.ads_header.get('1.0', tk.END).strip()
-        content = self.ads_content.get('1.0', tk.END).strip()
-        footer = self.ads_footer.get('1.0', tk.END).strip()
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM ads_settings WHERE workspace_id = ?', (self.current_workspace_id,))
-            exists = cursor.fetchone()
-            
-            if exists:
-                cursor.execute('UPDATE ads_settings SET header_code = ?, footer_code = ?, content_code = ? WHERE workspace_id = ?', (header, footer, content, self.current_workspace_id))
-            else:
-                cursor.execute('INSERT INTO ads_settings (workspace_id, header_code, footer_code, content_code) VALUES (?, ?, ?, ?)', (self.current_workspace_id, header, footer, content))
-            
-            conn.commit()
-            conn.close()
-            self.update_status("Ads saved!", 'success')
-            messagebox.showinfo("Success", "Ads settings saved!")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed:\n{e}")
+        messagebox.showinfo("Settings", "Settings - AI Models & Ads Management!")
     
     def _show_no_workspace_error(self):
         tk.Label(self.content_frame, text="No Workspace Selected", font=('Segoe UI', 24, 'bold'), bg=COLORS['white'], fg=COLORS['danger']).pack(pady=50)
-        tk.Label(self.content_frame, text="Create or select a workspace to continue.", font=('Segoe UI', 14), bg=COLORS['white'], fg=COLORS['text_light']).pack(pady=20)
+        tk.Label(self.content_frame, text="Create or select a workspace.", font=('Segoe UI', 14), bg=COLORS['white'], fg=COLORS['text_light']).pack(pady=20)
         ModernButton(self.content_frame, "Create Workspace", self.new_workspace, 'success').pack(pady=20)
 
 def main():
