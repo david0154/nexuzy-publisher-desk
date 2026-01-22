@@ -1,4 +1,4 @@
-"""
+""" 
 Nexuzy Publisher Desk - Main Entry Point
 Complete offline AI-powered news publishing application
 Built with Python, Tkinter, and offline AI models (Pure Python - No C++)
@@ -14,12 +14,17 @@ from tkinter import messagebox, scrolledtext
 from pathlib import Path
 import logging
 
-# Configure logging
+# Fix Windows encoding issues
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
+# Configure logging with UTF-8 encoding
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('nexuzy_publisher.log'),
+        logging.FileHandler('nexuzy_publisher.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -88,9 +93,9 @@ class ModelDownloader:
                         'type': model_info.get('type', 'standard')
                     }
                     self.save_config(config)
-                    logger.info(f"✓ {model_name} downloaded successfully")
+                    logger.info(f"[OK] {model_name} downloaded successfully")
                 except Exception as e:
-                    logger.error(f"✗ Failed to download {model_name}: {e}")
+                    logger.error(f"[FAIL] Failed to download {model_name}: {e}")
                     return False
         
         return True
@@ -313,7 +318,7 @@ class DatabaseSetup:
         
         conn.commit()
         conn.close()
-        logger.info("✓ Database initialized successfully")
+        logger.info("[OK] Database initialized successfully")
 
 # ============================================================================
 # TKINTER UI - MAIN WINDOW WITH FULL WIRING
@@ -369,7 +374,7 @@ class NexuzyPublisherApp(tk.Tk):
             self.translator = Translator(self.db_path)
             self.wordpress = WordPressAPI(self.db_path)
             
-            logger.info("✓ Core modules loaded (Pure Python)")
+            logger.info("[OK] Core modules loaded (Pure Python)")
         except ImportError as e:
             logger.error(f"Failed to import modules: {e}")
             messagebox.showerror("Error", f"Failed to load core modules: {e}")
@@ -382,7 +387,7 @@ class NexuzyPublisherApp(tk.Tk):
         
         header_label = tk.Label(
             header,
-            text="📰 Nexuzy Publisher Desk (Pure Python)",
+            text="Nexuzy Publisher Desk (Pure Python)",
             font=('Arial', 16, 'bold'),
             bg='#2c3e50',
             fg='white'
@@ -408,11 +413,11 @@ class NexuzyPublisherApp(tk.Tk):
         button_frame.pack(fill=tk.X, padx=5, pady=20)
         
         tk.Button(button_frame, text="+ New Workspace", command=self.new_workspace).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="📡 RSS Manager", command=self.show_rss_manager).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="📰 News Queue", command=self.show_news_queue).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="✏️ Editor", command=self.show_editor).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="🌐 WordPress", command=self.show_wordpress_config).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="⚙️ Settings", command=self.show_settings).pack(fill=tk.X, pady=3)
+        tk.Button(button_frame, text="RSS Manager", command=self.show_rss_manager).pack(fill=tk.X, pady=3)
+        tk.Button(button_frame, text="News Queue", command=self.show_news_queue).pack(fill=tk.X, pady=3)
+        tk.Button(button_frame, text="Editor", command=self.show_editor).pack(fill=tk.X, pady=3)
+        tk.Button(button_frame, text="WordPress", command=self.show_wordpress_config).pack(fill=tk.X, pady=3)
+        tk.Button(button_frame, text="Settings", command=self.show_settings).pack(fill=tk.X, pady=3)
         
         # Right panel - Content area
         self.content_frame = tk.Frame(main_container, bg='white')
@@ -510,7 +515,7 @@ class NexuzyPublisherApp(tk.Tk):
     def show_settings(self):
         self.clear_content()
         
-        title = tk.Label(self.content_frame, text="⚙️ Settings", font=('Arial', 14, 'bold'))
+        title = tk.Label(self.content_frame, text="Settings", font=('Arial', 14, 'bold'))
         title.pack(pady=10)
         
         settings_frame = tk.Frame(self.content_frame, bg='white')
@@ -528,15 +533,15 @@ class NexuzyPublisherApp(tk.Tk):
         for model_name, purpose in models:
             status_frame = tk.Frame(settings_frame, bg='white')
             status_frame.pack(fill=tk.X, pady=5)
-            tk.Label(status_frame, text=f"✓ {model_name}", font=('Arial', 9)).pack(anchor=tk.W)
+            tk.Label(status_frame, text=f"[OK] {model_name}", font=('Arial', 9)).pack(anchor=tk.W)
             tk.Label(status_frame, text=f"   Purpose: {purpose}", font=('Arial', 8), fg='gray').pack(anchor=tk.W)
         
         # Total size
         tk.Label(settings_frame, text="\nTotal Model Size: ~15GB (Pure Python - No C++ compilation)", font=('Arial', 9, 'bold'), fg='#27ae60').pack(anchor=tk.W, pady=10)
         
-        tk.Label(settings_frame, text="\n✅ NO C++ Compiler Required", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
-        tk.Label(settings_frame, text="✅ Works on Python 3.9, 3.10, 3.11, 3.12, 3.13", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
-        tk.Label(settings_frame, text="✅ All dependencies install from pip", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
+        tk.Label(settings_frame, text="\n[OK] NO C++ Compiler Required", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
+        tk.Label(settings_frame, text="[OK] Works on Python 3.9, 3.10, 3.11, 3.12, 3.13", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
+        tk.Label(settings_frame, text="[OK] All dependencies install from pip", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
     
     def clear_content(self):
         """Clear content frame"""
@@ -565,9 +570,9 @@ def main():
     def download_models_async():
         """Download models in background thread"""
         if downloader.check_and_download():
-            logger.info("✓ All AI models ready (Pure Python)")
+            logger.info("[OK] All AI models ready (Pure Python)")
         else:
-            logger.warning("⚠ Some models failed to download, app will run in limited mode")
+            logger.warning("[WARN] Some models failed to download, app will run in limited mode")
     
     # Download in thread to not block UI
     download_thread = threading.Thread(target=download_models_async, daemon=True)
