@@ -1,390 +1,445 @@
-# 📰 Nexuzy Publisher Desk
+<div align="center">
 
-**Complete offline AI-powered news publishing desktop application**
+![Nexuzy Publisher Desk Logo](resources/logo.png)
 
-A professional-grade newsroom desktop tool that combines RSS aggregation, AI-assisted content creation, fact verification, and WordPress integration—all running locally without internet dependency.
+# Nexuzy Publisher Desk
+
+### 🚀 **AI-Powered Offline News Publishing Platform**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/david0154/nexuzy-publisher-desk)
+[![Status](https://img.shields.io/badge/status-Active-success)](https://github.com/david0154/nexuzy-publisher-desk)
+
+**Automate your entire news publishing workflow with AI - from RSS feeds to WordPress - completely offline!**
+
+[Features](#-features) • [Installation](#-installation) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Contributing](#-contributing)
+
+---
+
+</div>
+
+## 📖 Overview
+
+Nexuzy Publisher Desk is a complete AI-powered news publishing platform that runs entirely **offline on your local machine**. It automates the entire workflow from RSS feed monitoring to WordPress publishing, with human editorial control at every critical step.
+
+### ✨ Why Nexuzy Publisher Desk?
+
+- 🔒 **100% Offline** - All AI models run locally, no data leaves your computer
+- 🤖 **AI-Powered** - Uses GGUF quantized models (Mistral-7B, NLLB-200)
+- 📰 **Complete Workflow** - RSS → Matching → Scraping → Draft → Edit → Translate → Publish
+- ✅ **Human Control** - You verify, edit, and approve everything before publishing
+- 🌐 **Multi-Language** - Built-in translation to 200+ languages
+- 💾 **Lightweight** - Only ~5GB AI models (GGUF optimized for CPU)
+- 🎨 **Simple UI** - Clean Tkinter interface, no complex setup
 
 ---
 
 ## 🎯 Features
 
-### 1. **RSS Feed Management**
-- Add unlimited RSS feeds
-- Categorize by topic (Tech, Business, World, etc.)
-- Multi-language support
-- Priority-based fetching
-- Enable/disable feeds dynamically
+### Core Capabilities
 
-### 2. **Intelligent News Matching**
-- AI-powered headline similarity detection (SentenceTransformer)
-- Group same-event stories from multiple sources
-- Authenticity verification by source count
-- Conflict detection in facts
-- Confidence scoring (single source = unverified, 3+ sources = verified)
+| Phase | Feature | Description |
+|-------|---------|-------------|
+| 📡 **RSS Management** | Multi-feed monitoring | Add unlimited RSS feeds with categories and priorities |
+| 🔍 **News Matching** | AI similarity detection | Groups related news from different sources using embeddings |
+| ✅ **Verification** | Multi-source validation | Requires 3+ independent sources for authenticity |
+| 🕷️ **Content Scraping** | Safe fact extraction | Extracts verifiable facts while respecting robots.txt |
+| ✍️ **AI Draft Generation** | Mistral-7B GGUF | Generates fact-based drafts from scraped content |
+| 📝 **Human Editor** | Full editorial control | Edit, verify, and approve before publishing |
+| 🌍 **Translation** | 200+ languages | NLLB-200 GGUF model for accurate translations |
+| 🚀 **WordPress Publishing** | REST API integration | Direct publishing with categories and tags |
 
-### 3. **Safe Content Scraping**
-- Extract facts, dates, names, quotes from articles
-- **No full article copying** - facts-only mode
-- Proper URL handling and error recovery
-- Source attribution for every fact
+### AI Models (GGUF Format - CPU Optimized)
 
-### 4. **AI Draft Generation**
-- Mistral-7B model for neutral, fact-based article generation
-- Guided by extracted facts and verified information
-- Multiple headline suggestions
-- Read-only initial drafts (human control mandatory)
+```
+📦 Total Size: ~5GB (70% smaller than standard models)
 
-### 5. **Editorial Control (Human First)**
-- Manual headline editing required
-- Human-edited checkboxes
-- Word count minimum enforcement
-- Similarity threshold validation
-- Publish buttons disabled until fully approved
-
-### 6. **Multi-Language Translation**
-- NLLB-200 for 10+ languages
-- Supported: English, Hindi, Bengali, Spanish, French, German, Arabic, Chinese, Japanese, Portuguese
-- Chunk-based translation for long articles
-- Per-language approval workflow
-
-### 7. **WordPress Integration**
-- Secure REST API connection
-- Application password authentication
-- Draft-only publishing (manual final publish in WordPress)
-- Connection testing before save
-- Credential encryption
-
-### 8. **Offline-First Architecture**
-- Runs completely offline after first setup
-- SQLite local database
-- Models cached in `./models/` directory
-- No cloud dependencies
-- Minimal RAM footprint
-
----
-
-## 📋 System Requirements
-
-- **OS**: Windows 10/11 (Linux/Mac support via Python)
-- **Python**: 3.9 - 3.11
-- **RAM**: 16GB recommended (12GB minimum)
-- **Storage**: 30GB for models + database
-- **GPU**: Optional (CUDA/ROCm for faster processing)
-- **Processor**: Multi-core CPU (4+ cores recommended)
+├── Mistral-7B-Instruct-GGUF (Q4_K_M) - 4.1GB
+│   └── Purpose: News article draft generation
+│   └── Format: GGUF quantized (llama.cpp compatible)
+│
+├── NLLB-200-Distilled-GGUF (Q4_K_M) - 800MB  
+│   └── Purpose: Multi-language translation
+│   └── Languages: 200+ supported
+│
+└── SentenceTransformer (all-MiniLM-L6-v2) - 80MB
+    └── Purpose: News similarity matching
+    └── Embeddings: Semantic search
+```
 
 ---
 
 ## 🚀 Installation
 
-### Option 1: Pre-built Executable (Windows)
+### Prerequisites
 
-1. Download `NexuzyPublisherDesk.exe` from [Releases](#)
-2. Double-click to run
-3. Models download automatically on first launch (~30-40 minutes depending on internet speed)
-4. Ready to use!
+- **Python 3.9+** (recommended: 3.10 or 3.11)
+- **8GB+ RAM** (16GB recommended for smooth operation)
+- **~10GB disk space** (5GB models + 5GB workspace)
+- **Internet** (first run only - to download AI models)
 
-### Option 2: From Source (Development)
+### Step 1: Clone Repository
 
 ```bash
-# Clone repository
 git clone https://github.com/david0154/nexuzy-publisher-desk.git
 cd nexuzy-publisher-desk
+```
 
-# Create virtual environment
+### Step 2: Install Dependencies
+
+```bash
+# Create virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install dependencies
+# Activate (Windows)
+venv\Scripts\activate
+
+# Activate (Linux/Mac)
+source venv/bin/activate
+
+# Install requirements
 pip install -r requirements.txt
+```
 
-# Run application
+### Step 3: Run Application
+
+```bash
 python main.py
 ```
 
-### Option 3: Build Your Own EXE
+**First Run:** Models will auto-download (~5GB, takes 15-20 minutes)
 
-```bash
-# Install PyInstaller
-pip install pyinstaller
+**Subsequent Runs:** Instant startup from cached models
 
-# Build executable
-pyinstaller build_config.spec
+---
 
-# Output: dist/NexuzyPublisherDesk.exe
+## ⚡ Quick Start
+
+### 1️⃣ Create Workspace
+
+```
+1. Click "+ New Workspace"
+2. Enter name (e.g., "Tech News")
+3. Workspace created ✓
+```
+
+### 2️⃣ Add RSS Feeds
+
+```
+1. Click "📡 RSS Manager"
+2. Click "+ Add Feed"
+3. Enter RSS URL (e.g., https://feeds.bbci.co.uk/news/rss.xml)
+4. Select category and language
+5. Save ✓
+```
+
+### 3️⃣ Fetch & Process News
+
+```
+1. Go to "📰 News Queue"
+2. Click "🔄 Fetch Latest News" (imports from all feeds)
+3. Click "🔍 Match & Verify" (AI groups similar headlines)
+4. Select news item
+5. Click "📄 Generate Draft" (AI writes article)
+```
+
+### 4️⃣ Edit & Publish
+
+```
+1. Go to "✏️ Editor"
+2. Review AI-generated draft
+3. Edit headline and body
+4. Check ✓ "Edited by Human" (required)
+5. Click "💾 Save Draft"
+6. Click "🌐 Translate" (optional - 200+ languages)
+7. Click "📤 Send to WordPress"
+```
+
+### 5️⃣ Configure WordPress
+
+```
+1. Go to "🌐 WordPress"
+2. Enter:
+   - Site URL: https://yoursite.com
+   - Username: your-wp-username
+   - App Password: (generate from WordPress)
+3. Click "🔗 Test Connection"
+4. Click "💾 Save" when test succeeds
+```
+
+**See [QUICK_START.md](QUICK_START.md) for detailed walkthrough**
+
+---
+
+## 📚 Documentation
+
+### User Guides
+
+- 📘 [**QUICK_START.md**](QUICK_START.md) - 5-minute setup guide
+- 📗 [**FEATURES.md**](FEATURES.md) - Complete feature documentation
+- 📕 [**WORDPRESS_SETUP.md**](WORDPRESS_SETUP.md) - WordPress REST API configuration
+- 📙 [**AI_MODELS.md**](AI_MODELS.md) - AI model details and customization
+
+### Developer Guides
+
+- 🔧 [**SETUP.md**](SETUP.md) - Development environment setup
+- 🏗️ [**ARCHITECTURE.md**](ARCHITECTURE.md) - System architecture overview
+- 📦 [**DEPLOYMENT.md**](DEPLOYMENT.md) - Building EXE and distribution
+- 🤝 [**CONTRIBUTING.md**](CONTRIBUTING.md) - Contribution guidelines
+
+---
+
+## 🛠️ Technology Stack
+
+### Backend
+- **Python 3.9+** - Core application
+- **SQLite** - Local database
+- **llama-cpp-python** - GGUF model inference (CPU-optimized)
+- **Transformers** - SentenceTransformer embeddings
+- **BeautifulSoup4** - Web scraping
+- **Feedparser** - RSS parsing
+
+### AI/ML
+- **Mistral-7B-GGUF** - Text generation (4.1GB Q4_K_M)
+- **NLLB-200-GGUF** - Translation (800MB Q4_K_M)
+- **SentenceTransformer** - Semantic similarity (80MB)
+
+### UI/Frontend
+- **Tkinter** - Native GUI (no web browser required)
+
+### Integrations
+- **WordPress REST API** - Publishing automation
+
+---
+
+## 🔧 Configuration
+
+### Database Location
+```
+./nexuzy.db
+```
+
+### Model Cache Directory
+```
+./models/
+├── TheBloke_Mistral-7B-Instruct-v0.2-GGUF/
+├── QuantFactory_nllb-200-distilled-600M-GGUF/
+└── sentence-transformers_all-MiniLM-L6-v2/
+```
+
+### Logs
+```
+./nexuzy_publisher.log
 ```
 
 ---
 
-## 📁 Project Structure
+## 🌐 WordPress Integration
 
+Nexuzy Publisher Desk uses **WordPress REST API** for seamless publishing.
+
+### Requirements
+- WordPress 5.0+
+- Application Password (WordPress 5.6+)
+- REST API enabled (default)
+
+### Setup
+
+**Step 1: Generate Application Password**
 ```
-nexuzy-publisher-desk/
-├── main.py                      # Application entry point + auto-downloader
-├── core/
-│   ├── rss_manager.py          # RSS feed handling
-│   ├── news_matcher.py         # AI-powered news grouping
-│   ├── content_scraper.py      # Safe fact extraction
-│   ├── ai_draft_generator.py   # Mistral-7B integration
-│   ├── translator.py           # NLLB-200 translations
-│   └── wordpress_api.py        # WordPress REST API
-├── models/                      # AI models (auto-downloaded)
-│   ├── all-MiniLM-L6-v2/       # SentenceTransformer for matching
-│   ├── Mistral-7B-Instruct/    # Draft generation model
-│   ├── nllb-200-distilled/     # Translation model
-│   └── models_config.json      # Downloaded models registry
-├── resources/                   # Icons and images
-│   └── logo.ico
-├── nexuzy.db                    # SQLite database (auto-created)
-├── nexuzy_publisher.log         # Application logs
-├── requirements.txt             # Python dependencies
-├── build_config.spec            # PyInstaller configuration
-├── .gitignore                   # Git ignore patterns
-└── README.md                    # This file
+1. WordPress Admin → Users → Your Profile
+2. Scroll to "Application Passwords"
+3. Enter name: "Nexuzy Publisher"
+4. Click "Add New Application Password"
+5. Copy the generated password (shown once)
 ```
 
----
-
-## 🔄 Complete Workflow
-
-### Phase 1: News Collection
-1. **Add RSS Feeds**: `RSS Manager` → `Add Feed` → Select category & language
-2. **Fetch News**: `Fetch Latest News` button → System reads all enabled feeds
-3. **Database Storage**: Headlines, summaries, URLs stored locally
-
-### Phase 2: Verification
-1. **Match Headlines**: SentenceTransformer groups similar headlines
-2. **Verify Authenticity**: System counts sources
-   - 1 source = "Low confidence" (unverified)
-   - 2-3 sources = "Medium confidence"
-   - 4+ sources = "High confidence" (verified)
-3. **Detect Conflicts**: Compare facts across sources
-
-### Phase 3: Scraping
-1. **Open News Group**: Click verified news event
-2. **Extract Facts**: System scrapes dates, names, quotes, facts
-3. **Store Reference Data**: No full article text, only reference facts
-
-### Phase 4: AI Analysis
-1. **Click "Analyze Event"**: AI reads all facts from multiple sources
-2. **Generate Timeline**: Events ordered chronologically
-3. **Build Fact List**: Consolidated verified information
-4. **Detect Contradictions**: Flag conflicting claims
-
-### Phase 5: Draft Generation
-1. **Click "Generate Draft"**: Mistral-7B creates neutral article
-2. **AI Output**:
-   - Suggested headlines (multiple options)
-   - Full article body
-   - Summary box
-3. **Draft Locked**: Read-only until manual editing
-
-### Phase 6: Editorial Review (MANDATORY)
-1. **Open Editor Panel**
-2. **Edit Headline**: Must change/approve manually
-3. **Rewrite Intro**: Personal editorial touch
-4. **Adjust Body**: Add context, fix tone
-5. **Check "Edited by Human"**: Checkbox required
-6. **Verify Word Count**: Minimum enforced
-7. **Publish button enables** only after all checks
-
-### Phase 7: Images & Translation
-1. **Select Images**: System suggests from RSS enclosures
-2. **Approve Images**: Manual image verification
-3. **Translate (Optional)**: Select language → Generate translations → Review each
-
-### Phase 8: WordPress Publishing
-1. **Configure WordPress**: Site URL + credentials
-2. **Test Connection**: Verify credentials work
-3. **Send as Draft**: Article appears as draft in WordPress
-4. **User Publishes**: Manual final publish in WordPress admin
-
----
-
-## 🤖 AI Models Used
-
-### 1. **SentenceTransformer** (all-MiniLM-L6-v2)
-- **Purpose**: News matching & similarity detection
-- **Size**: 80MB
-- **Speed**: Fast CPU processing
-- **Function**: Groups same-event headlines, calculates confidence
-
-### 2. **Mistral-7B-Instruct**
-- **Purpose**: Article draft generation
-- **Size**: 14GB (quantized: 4GB with GGUF)
-- **Speed**: 2-5 tokens/sec on CPU (faster with GPU)
-- **Function**: Generates neutral, fact-based articles from extracted facts
-
-### 3. **NLLB-200-Distilled**
-- **Purpose**: Multi-language translation
-- **Size**: 2.4GB
-- **Languages**: 200+ language pairs
-- **Function**: Translates articles preserving meaning and context
-
-### Auto-Download on First Run
-
-Models automatically download from HuggingFace on first application launch:
+**Step 2: Configure in Nexuzy**
 ```
-✓ Downloading SentenceTransformer... (80MB)
-✓ Downloading Mistral-7B... (14GB or 4GB quantized)
-✓ Downloading NLLB-200... (2.4GB)
-✓ All models ready
+1. Open Nexuzy Publisher Desk
+2. Go to "🌐 WordPress"
+3. Enter:
+   - Site URL: https://yoursite.com
+   - Username: your-username
+   - App Password: (paste from Step 1)
+4. Test Connection
+5. Save
 ```
 
-**Progress**: Terminal shows download percentage and ETA
+**See [WORDPRESS_SETUP.md](WORDPRESS_SETUP.md) for troubleshooting**
 
 ---
 
-## 🔐 Privacy & Security
+## 👥 Team
 
-✅ **Complete Privacy**
-- No data sent to cloud
-- All processing local
-- SQLite database encrypted option available
-- WordPress credentials stored locally (can be encrypted)
+### Lead Developer
 
-✅ **Content Safety**
-- No full article copying
-- Facts-based only
-- Human approval mandatory before publish
-- Conflict detection prevents misinformation
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/david0154">
+        <img src="https://github.com/david0154.png" width="100px;" alt="David"/><br />
+        <sub><b>David</b></sub>
+      </a><br />
+      <sub>Project Lead & Core Developer</sub>
+    </td>
+  </tr>
+</table>
 
-✅ **AdSense Safe**
-- Human-edited mandatory
-- Conflict detection
-- Source verification
-- No scraped content publication
+### Organization
 
----
+**Nexuzy Tech** - Innovation in AI-powered automation
 
-## 📊 Database Schema
-
-Key tables:
-- `workspaces` - Separate newsrooms
-- `rss_feeds` - Managed feed sources
-- `news_queue` - Fetched news items
-- `news_groups` - Grouped same-event stories
-- `scraped_facts` - Extracted information
-- `ai_drafts` - Generated articles
-- `translations` - Multi-language versions
-- `wordpress_posts` - Published articles
-- `wp_credentials` - WordPress configuration
-
----
-
-## ⚡ Performance Tips
-
-1. **GPU Acceleration**: Install CUDA/ROCm for 10x faster processing
-2. **Limit Feeds**: 50-100 feeds recommended, 200+ max
-3. **Weekly Cleanup**: Archive old news items
-4. **Model Selection**: Use distilled versions for faster performance on low-end hardware
-5. **Batch Processing**: Process multiple articles before publishing
-
----
-
-## 🐛 Troubleshooting
-
-### Models Not Downloading
-```bash
-# Manual download
-python -c "from main import ModelDownloader; ModelDownloader().check_and_download()"
-```
-
-### Out of Memory
-- Close other applications
-- Install GPU support (CUDA)
-- Use quantized models
-- Process fewer articles at once
-
-### WordPress Connection Failed
-- Verify credentials in WordPress
-- Check application password is enabled
-- Ensure REST API not disabled
-- Test with curl: `curl -u username:password https://yoursite.com/wp-json/wp/v2/posts`
-
-### Slow Translation
-- GPU significantly speeds up translations
-- Translate shorter articles first
-- Consider translating only key languages
-
----
-
-## 📝 Usage Examples
-
-### Example 1: Tech News Aggregation
-1. Add TechCrunch, Hacker News, The Verge RSS feeds
-2. Fetch latest → System finds 5 articles about "AI Breakthrough"
-3. AI matches them → Groups as same event
-4. Generate draft → AI writes neutral article comparing all sources
-5. Edit manually → Add your analysis
-6. Publish to WordPress as draft → Review before final publish
-
-### Example 2: Multi-Language Publishing
-1. Generate English article (as above)
-2. Translate to Hindi, Bengali
-3. Publish 3 WordPress drafts (one per language)
-4. Share across regional audiences
-
----
-
-## 🎓 Learning Resources
-
-- **SentenceTransformer Docs**: https://www.sbert.net/
-- **Mistral AI**: https://mistral.ai/
-- **NLLB Translation**: https://huggingface.co/facebook/nllb-200
-- **WordPress REST API**: https://developer.wordpress.com/docs/api/
+- 🌐 Website: [Coming Soon]
+- 📧 Contact: [136182039+david0154@users.noreply.github.com](mailto:136182039+david0154@users.noreply.github.com)
+- 🐙 GitHub: [@david0154](https://github.com/david0154)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome! Areas for improvement:
-- Advanced image verification
-- Database encryption
-- Export to multiple formats
-- Cloud backup integration
-- Advanced analytics
+We welcome contributions! Here's how you can help:
+
+### Ways to Contribute
+
+- 🐛 **Report Bugs** - Open an issue with detailed reproduction steps
+- 💡 **Suggest Features** - Share your ideas in GitHub Discussions
+- 📝 **Improve Documentation** - Fix typos, add examples
+- 🔧 **Submit Code** - Fork, develop, and create pull requests
+- 🌍 **Translations** - Help translate UI and documentation
+
+### Development Setup
+
+```bash
+# Fork repository
+git clone https://github.com/YOUR_USERNAME/nexuzy-publisher-desk.git
+cd nexuzy-publisher-desk
+
+# Create feature branch
+git checkout -b feature/amazing-feature
+
+# Make changes
+# ...
+
+# Commit with conventional commits
+git commit -m "feat: add amazing feature"
+
+# Push and create PR
+git push origin feature/amazing-feature
+```
+
+**See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines**
 
 ---
 
-## 📄 License
+## 📜 License
 
-MIT License - See LICENSE file
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
 
----
+```
+MIT License
 
-## 🙋 Support
+Copyright (c) 2026 David & Nexuzy Tech
 
-**Issues?** 
-- Check [GitHub Issues](https://github.com/david0154/nexuzy-publisher-desk/issues)
-- Review logs in `nexuzy_publisher.log`
-- Test models manually in Python REPL
-
-**Feature Requests?**
-- Open GitHub Discussion
-- Describe use case
-- Provide examples
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software...
+```
 
 ---
 
-## 📞 Contact
+## 🙏 Acknowledgments
 
-**Developed by**: [Nexuzy Tech](https://imdavid.in)
-**GitHub**: [david0154](https://github.com/david0154)
-**Email**: contact@nexuzy.in
+### Open Source Projects
+
+- **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - GGUF inference engine
+- **[Mistral AI](https://mistral.ai/)** - Mistral-7B base model
+- **[Meta AI](https://ai.meta.com/)** - NLLB translation model
+- **[HuggingFace](https://huggingface.co/)** - Model hosting and transformers
+- **[WordPress](https://wordpress.org/)** - REST API integration
+
+### Model Creators
+
+- **[TheBloke](https://huggingface.co/TheBloke)** - GGUF quantized Mistral models
+- **[QuantFactory](https://huggingface.co/QuantFactory)** - GGUF NLLB models
+- **[sentence-transformers](https://www.sbert.net/)** - Embedding models
 
 ---
 
-## 🚀 Roadmap
+## 📊 Project Stats
 
-- [ ] Cloud storage sync (optional)
-- [ ] Advanced fact verification (Claim Buster API)
-- [ ] Image NSFW detection improvement
-- [ ] Video content support
+<div align="center">
+
+![GitHub stars](https://img.shields.io/github/stars/david0154/nexuzy-publisher-desk?style=social)
+![GitHub forks](https://img.shields.io/github/forks/david0154/nexuzy-publisher-desk?style=social)
+![GitHub watchers](https://img.shields.io/github/watchers/david0154/nexuzy-publisher-desk?style=social)
+
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/david0154/nexuzy-publisher-desk)
+![GitHub last commit](https://img.shields.io/github/last-commit/david0154/nexuzy-publisher-desk)
+![GitHub issues](https://img.shields.io/github/issues/david0154/nexuzy-publisher-desk)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/david0154/nexuzy-publisher-desk)
+
+</div>
+
+---
+
+## 🗺️ Roadmap
+
+### Version 1.2.0 (Q2 2026)
+- [ ] Advanced fact-checking with ClaimBuster API
+- [ ] Image AI verification (NSFW, relevance)
+- [ ] Database encryption
+- [ ] Batch operations
+- [ ] Export to PDF/DOCX
+
+### Version 2.0.0 (Q3 2026)
+- [ ] Optional cloud backup
 - [ ] Real-time collaboration
-- [ ] API for external integrations
+- [ ] REST API for external integrations
 - [ ] Mobile companion app
-- [ ] Voice input for quick notes
+- [ ] SaaS version (optional)
+
+**See [ROADMAP.md](ROADMAP.md) for detailed planning**
 
 ---
 
-**Built with ❤️ for modern newsrooms. Offline. Private. Powerful.**
+## 💬 Support
+
+### Getting Help
+
+- 📖 **Documentation**: Check the [docs folder](docs/)
+- 🐛 **Bug Reports**: [Open an issue](https://github.com/david0154/nexuzy-publisher-desk/issues/new?template=bug_report.md)
+- 💡 **Feature Requests**: [Open an issue](https://github.com/david0154/nexuzy-publisher-desk/issues/new?template=feature_request.md)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/david0154/nexuzy-publisher-desk/discussions)
+
+### Community
+
+- ⭐ **Star this repo** if you find it useful!
+- 🐦 **Follow us** for updates [Coming Soon]
+- 📢 **Share** with fellow developers and publishers
+
+---
+
+## ⚠️ Disclaimer
+
+- **AI-Generated Content**: All AI drafts must be reviewed and edited by humans before publishing
+- **Content Responsibility**: Users are responsible for verifying facts and ensuring accuracy
+- **Copyright**: Respect copyright laws when scraping and publishing content
+- **WordPress**: Ensure you have proper permissions to publish to your WordPress site
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [David](https://github.com/david0154) & [Nexuzy Tech](https://github.com/david0154)**
+
+**[⬆ Back to Top](#nexuzy-publisher-desk)**
+
+---
+
+*Last Updated: January 22, 2026*
+
+</div>
