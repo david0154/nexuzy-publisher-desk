@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+Env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Models (large, don't commit)
+models/
+
+# Logs
+*.log
+*.pot
+
+# Dist files
+dist/
+build/
+*.spec
+!build_config.spec
+
+# Resources
+resources/*.ico
+resources/*.png
+resources/*.jpg
+
+# Credentials
+.env
+.env.local
