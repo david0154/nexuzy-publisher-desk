@@ -1,6 +1,7 @@
 """
 AI Draft Generation Module
 Generates news articles using Mistral-7B-GGUF (quantized Q4_K_M, 4.1GB)
+Using ctransformers for pure Python GGUF support
 """
 
 import sqlite3
@@ -11,7 +12,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class DraftGenerator:
-    """Generate AI-assisted news drafts using GGUF quantized model"""
+    """Generate AI-assisted news drafts using GGUF quantized model with ctransformers"""
     
     def __init__(self, db_path: str, model_name: str = 'TheBloke/Mistral-7B-Instruct-v0.2-GGUF'):
         self.db_path = db_path
@@ -20,9 +21,9 @@ class DraftGenerator:
         self.llm = self._load_model()
     
     def _load_model(self):
-        """Load GGUF quantized Mistral model (4.1GB with llama-cpp-python)"""
+        """Load GGUF quantized Mistral model (4.1GB with ctransformers)"""
         try:
-            from llama_cpp import Llama
+            from ctransformers import AutoModelForCausalLM
             
             logger.info(f"Loading GGUF model: {self.model_name}")
             
@@ -34,20 +35,20 @@ class DraftGenerator:
                 logger.warning(f"Model not found at {model_path}, will use template generation")
                 return None
             
-            # Load GGUF model with llama-cpp-python
-            llm = Llama(
-                model_path=str(model_path),
-                n_ctx=4096,  # Context window
-                n_threads=4,  # CPU threads (adjust based on your CPU)
-                n_gpu_layers=0,  # 0 for CPU, increase if GPU available
-                verbose=False
+            # Load GGUF model with ctransformers
+            llm = AutoModelForCausalLM.from_pretrained(
+                str(model_path),
+                model_type='mistral',
+                context_length=4096,
+                threads=4,  # CPU threads (adjust based on your CPU)
+                gpu_layers=0  # 0 for CPU, increase if GPU available
             )
             
-            logger.info("✓ Mistral-7B-GGUF Q4_K_M loaded (4.1GB, CPU-optimized)")
+            logger.info("✓ Mistral-7B-GGUF Q4_K_M loaded (4.1GB, CPU-optimized, ctransformers)")
             return llm
         
         except ImportError:
-            logger.error("llama-cpp-python not installed. Install with: pip install llama-cpp-python")
+            logger.error("ctransformers not installed. Install with: pip install ctransformers>=0.2.27")
             return None
         except Exception as e:
             logger.error(f"Error loading GGUF model: {e}")
@@ -91,18 +92,16 @@ class DraftGenerator:
                 logger.warning("GGUF model not loaded, returning template draft")
                 return self._template_draft(headline, summary, facts)
             
-            # Generate with Mistral-GGUF
+            # Generate with Mistral-GGUF using ctransformers
             try:
-                output = self.llm(
+                generated_text = self.llm(
                     prompt,
-                    max_tokens=512,
+                    max_new_tokens=512,
                     temperature=0.7,
                     top_p=0.9,
                     stop=["</s>", "[/INST]"],
-                    echo=False
+                    stream=False
                 )
-                
-                generated_text = output['choices'][0]['text']
             
             except Exception as e:
                 logger.error(f"GGUF generation error: {e}")
@@ -121,7 +120,7 @@ class DraftGenerator:
             # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"Generated draft for news_id {news_id} using GGUF model")
+            logger.info(f"Generated draft for news_id {news_id} using GGUF model (ctransformers)")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
