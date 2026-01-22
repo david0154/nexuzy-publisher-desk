@@ -1,6 +1,6 @@
 """
 AI Draft Generation Module
-Generates news articles using Mistral-7B with fact-based prompts
+Generates news articles using Mistral-7B-GPTQ (quantized, 4GB) with fact-based prompts
 """
 
 import sqlite3
@@ -10,27 +10,38 @@ from typing import Dict, List
 logger = logging.getLogger(__name__)
 
 class DraftGenerator:
-    """Generate AI-assisted news drafts"""
+    """Generate AI-assisted news drafts using quantized model"""
     
-    def __init__(self, db_path: str, model_name: str = 'mistralai/Mistral-7B-Instruct-v0.1'):
+    def __init__(self, db_path: str, model_name: str = 'TheBloke/Mistral-7B-Instruct-v0.2-GPTQ'):
         self.db_path = db_path
         self.model_name = model_name
         self.pipeline = self._load_model()
     
     def _load_model(self):
-        """Load Mistral model"""
+        """Load quantized Mistral model (GPTQ - 4GB instead of 14GB)"""
         try:
-            from transformers import pipeline
-            # Using text generation pipeline
-            pipe = pipeline(
-                'text-generation',
-                model=self.model_name,
-                device=0 if self._has_gpu() else -1,  # GPU if available
-                trust_remote_code=True
+            from transformers import AutoTokenizer
+            from auto_gptq import AutoGPTQForCausalLM
+            
+            logger.info(f"Loading quantized model: {self.model_name}")
+            
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            
+            # Load GPTQ quantized model
+            model = AutoGPTQForCausalLM.from_quantized(
+                self.model_name,
+                device="cuda:0" if self._has_gpu() else "cpu",
+                use_safetensors=True,
+                use_triton=False  # Better CPU compatibility
             )
-            logger.info("Mistral-7B model loaded successfully")
-            return pipe
+            
+            logger.info("✓ Mistral-7B-GPTQ loaded (4GB quantized)")
+            return {'model': model, 'tokenizer': tokenizer}
         
+        except ImportError:
+            logger.error("auto-gptq not installed. Install with: pip install auto-gptq")
+            return None
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             return None
@@ -82,24 +93,40 @@ class DraftGenerator:
                 logger.warning("Model not loaded, returning template draft")
                 return self._template_draft(headline, summary, facts)
             
-            # Generate with Mistral
-            output = self.pipeline(
-                prompt,
-                max_length=1024,
-                num_return_sequences=1,
-                temperature=0.7,
-                top_p=0.9,
-                do_sample=True,
-                truncation=True
-            )
+            # Generate with Mistral-GPTQ
+            try:
+                tokenizer = self.pipeline['tokenizer']
+                model = self.pipeline['model']
+                
+                inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+                
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=512,
+                    temperature=0.7,
+                    top_p=0.9,
+                    do_sample=True,
+                    pad_token_id=tokenizer.eos_token_id
+                )
+                
+                generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            generated_text = output[0]['generated_text']
+            except Exception as e:
+                logger.error(f"Generation error: {e}")
+                return self._template_draft(headline, summary, facts)
             
             # Parse output
             draft = self._parse_output(generated_text, headline, summary)
             
+            # Get workspace_id
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT workspace_id FROM news_queue WHERE id = ?', (news_id,))
+            workspace_id = cursor.fetchone()[0]
+            conn.close()
+            
             # Store draft
-            draft_id = self._store_draft(news_id, draft)
+            draft_id = self._store_draft(news_id, workspace_id, draft)
             
             logger.info(f"Generated draft for news_id {news_id}")
             return {**draft, 'id': draft_id}
@@ -115,7 +142,7 @@ class DraftGenerator:
         """
         facts_str = "\n".join([f"- {fact_type}: {content}" for fact_type, content in facts])
         
-        prompt = f"""You are a professional news journalist. Write a neutral, fact-based news article.
+        prompt = f"""<s>[INST] You are a professional news journalist. Write a neutral, fact-based news article.
 
 Headline: {headline}
 Summary: {summary}
@@ -123,30 +150,23 @@ Summary: {summary}
 Facts to include:
 {facts_str}
 
-Write the article:
+Write a concise article (300-500 words):
 1. Start with a compelling introduction (2-3 sentences)
 2. Include verified facts from above
 3. Add context and background
 4. Keep neutral tone - avoid opinion
-5. Conclude with implications or next steps
+5. Conclude with implications
 
-Article:"""
+Article: [/INST]"""
         
         return prompt
     
     def _parse_output(self, text: str, headline: str, summary: str) -> Dict:
         """Parse model output into structured draft"""
-        # Extract article body
-        lines = text.split('\n')
-        article_start = -1
-        
-        for i, line in enumerate(lines):
-            if 'Article:' in line or 'article:' in line.lower():
-                article_start = i + 1
-                break
-        
-        if article_start > 0:
-            body = '\n'.join(lines[article_start:]).strip()
+        # Extract article body (remove prompt)
+        if '[/INST]' in text:
+            parts = text.split('[/INST]')
+            body = parts[-1].strip() if len(parts) > 1 else text
         else:
             body = text
         
@@ -187,7 +207,7 @@ Article:"""
             'word_count': len(body.split())
         }
     
-    def _store_draft(self, news_id: int, draft: Dict) -> int:
+    def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
         """Store draft in database"""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -195,9 +215,10 @@ Article:"""
             
             cursor.execute('''
                 INSERT INTO ai_drafts 
-                (news_id, title, headline_suggestions, body_draft, summary, word_count)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (workspace_id, news_id, title, headline_suggestions, body_draft, summary, word_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
+                workspace_id,
                 news_id,
                 draft['title'],
                 str(draft['headline_suggestions']),
