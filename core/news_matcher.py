@@ -6,24 +6,31 @@ Groups same-event headlines using AI-powered similarity
 import sqlite3
 import logging
 from typing import List, Dict, Tuple
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 class NewsMatchEngine:
     """Match and group same-event news items"""
     
-    def __init__(self, db_path: str, model_path: str = 'models/all-MiniLM-L6-v2'):
+    def __init__(self, db_path: str, model_name: str = 'sentence-transformers/all-MiniLM-L6-v2'):
         self.db_path = db_path
-        self.model = self._load_model(model_path)
+        self.model_name = model_name
+        self.model = self._load_model()
     
-    def _load_model(self, model_path: str):
+    def _load_model(self):
         """Load SentenceTransformer model"""
         try:
-            return SentenceTransformer(model_path)
+            from sentence_transformers import SentenceTransformer
+            
+            # Try to load from cache first
+            logger.info(f"Loading sentence transformer: {self.model_name}")
+            model = SentenceTransformer(self.model_name)
+            logger.info("[OK] News matching model loaded")
+            return model
         except Exception as e:
             logger.error(f"Error loading model: {e}")
+            logger.warning("News matching will be disabled")
             return None
     
     def group_similar_headlines(self, workspace_id: int, threshold: float = 0.7) -> Dict[int, List[int]]:
@@ -31,7 +38,13 @@ class NewsMatchEngine:
         Group headlines by similarity
         Returns dict: {group_id: [news_ids]}
         """
+        if not self.model:
+            logger.warning("Model not loaded, skipping grouping")
+            return {}
+        
         try:
+            from sentence_transformers import util
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
@@ -45,7 +58,7 @@ class NewsMatchEngine:
             
             news_items = cursor.fetchall()
             
-            if not news_items or not self.model:
+            if not news_items:
                 conn.close()
                 return {}
             
@@ -133,30 +146,23 @@ class NewsMatchEngine:
             source_count = result[0]
             
             # Authenticity rules:
-            # 1 source: Low confidence (0.3)
-            # 2-3 sources: Medium confidence (0.6)
-            # 4+ sources: High confidence (0.9+)
-            
             if source_count == 1:
-                return (False, 0.3)  # Single source = not verified
+                return (False, 0.3)
             elif source_count <= 3:
-                return (True, 0.6)   # Few sources = medium confidence
+                return (True, 0.6)
             else:
-                return (True, min(0.99, 0.7 + (source_count * 0.05)))  # Multiple sources = high confidence
+                return (True, min(0.99, 0.7 + (source_count * 0.05)))
         
         except Exception as e:
             logger.error(f"Error verifying group: {e}")
             return (False, 0.0)
     
     def detect_conflicting_claims(self, group_id: int) -> List[Dict]:
-        """
-        Detect conflicting facts within same news group
-        """
+        """Detect conflicting facts within same news group"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all facts in group
             cursor.execute('''
                 SELECT DISTINCT sf.fact_type, sf.content, sf.source_url
                 FROM scraped_facts sf
@@ -168,15 +174,13 @@ class NewsMatchEngine:
             conn.close()
             
             conflicts = []
-            
-            # Simple conflict detection: same fact_type with different content
             fact_types = {}
+            
             for fact_type, content, source in facts:
                 if fact_type not in fact_types:
                     fact_types[fact_type] = []
                 fact_types[fact_type].append((content, source))
             
-            # Find conflicts
             for fact_type, items in fact_types.items():
                 if len(set([item[0] for item in items])) > 1:
                     conflicts.append({

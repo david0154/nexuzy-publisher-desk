@@ -1,7 +1,6 @@
 """
 AI Draft Generation Module
-Generates news articles using Mistral-7B-GGUF (quantized Q4_K_M, 4.1GB)
-Using ctransformers for pure Python GGUF support
+Generates news articles using Mistral-7B-GGUF or template fallback
 """
 
 import sqlite3
@@ -25,33 +24,48 @@ class DraftGenerator:
         try:
             from ctransformers import AutoModelForCausalLM
             
-            logger.info(f"Loading GGUF model: {self.model_name}")
+            logger.info(f"Looking for GGUF model: {self.model_name}")
             
-            # Construct model path
-            model_dir = Path('models') / self.model_name.replace('/', '_')
-            model_path = model_dir / self.model_file
+            # Check multiple possible paths
+            possible_paths = [
+                Path('models') / self.model_name.replace('/', '_') / self.model_file,
+                Path('models') / self.model_file,
+                Path(self.model_file)
+            ]
             
-            if not model_path.exists():
-                logger.warning(f"Model not found at {model_path}, will use template generation")
+            model_path = None
+            for path in possible_paths:
+                if path.exists():
+                    model_path = path
+                    break
+            
+            if not model_path:
+                logger.warning(f"GGUF model not found. Checked paths:")
+                for p in possible_paths:
+                    logger.warning(f"  - {p}")
+                logger.info("Will use template generation mode")
                 return None
+            
+            logger.info(f"Loading GGUF model from: {model_path}")
             
             # Load GGUF model with ctransformers
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type='mistral',
                 context_length=4096,
-                threads=4,  # CPU threads (adjust based on your CPU)
-                gpu_layers=0  # 0 for CPU, increase if GPU available
+                threads=4,
+                gpu_layers=0
             )
             
-            logger.info("✓ Mistral-7B-GGUF Q4_K_M loaded (4.1GB, CPU-optimized, ctransformers)")
+            logger.info("[OK] Mistral-7B-GGUF Q4_K_M loaded (4.1GB)")
             return llm
         
         except ImportError:
-            logger.error("ctransformers not installed. Install with: pip install ctransformers>=0.2.27")
+            logger.error("ctransformers not installed. Using template mode.")
             return None
         except Exception as e:
             logger.error(f"Error loading GGUF model: {e}")
+            logger.info("Using template generation mode")
             return None
     
     def generate_draft(self, news_id: int) -> Dict:
@@ -89,7 +103,7 @@ class DraftGenerator:
             prompt = self._build_prompt(headline, summary, facts)
             
             if not self.llm:
-                logger.warning("GGUF model not loaded, returning template draft")
+                logger.info("Using template mode (no GGUF model)")
                 return self._template_draft(headline, summary, facts)
             
             # Generate with Mistral-GGUF using ctransformers
@@ -120,7 +134,7 @@ class DraftGenerator:
             # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"Generated draft for news_id {news_id} using GGUF model (ctransformers)")
+            logger.info(f"Generated draft for news_id {news_id}")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
@@ -128,10 +142,7 @@ class DraftGenerator:
             return self._template_draft(headline, summary, [])
     
     def _build_prompt(self, headline: str, summary: str, facts: List[tuple]) -> str:
-        """
-        Build prompt for GGUF model
-        Structured to guide neutral, fact-based generation
-        """
+        """Build prompt for GGUF model"""
         facts_str = "\n".join([f"- {fact_type}: {content}" for fact_type, content in facts])
         
         prompt = f"""<s>[INST] You are a professional news journalist. Write a neutral, fact-based news article.
@@ -155,10 +166,8 @@ Article: [/INST]"""
     
     def _parse_output(self, text: str, headline: str, summary: str) -> Dict:
         """Parse model output into structured draft"""
-        # Clean up generated text
         body = text.strip()
         
-        # Generate headline suggestions
         headline_suggestions = [
             f"{headline}",
             f"Breaking: {headline}",
@@ -168,7 +177,7 @@ Article: [/INST]"""
         return {
             'title': headline,
             'headline_suggestions': headline_suggestions,
-            'body_draft': body[:1500],  # Truncate to reasonable length
+            'body_draft': body[:1500],
             'summary': summary,
             'word_count': len(body.split())
         }
