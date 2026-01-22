@@ -89,25 +89,33 @@ MODEL_CONFIGS = {
         'display_name': 'David AI 2B',
         'size': '80MB',
         'purpose': 'News Similarity Matching',
-        'color': COLORS['success']
+        'color': COLORS['success'],
+        'module': 'core.news_matcher',
+        'class': 'NewsMatchEngine'
     },
     'draft_generator': {
         'display_name': 'David AI Writer 7B',
         'size': '4.1GB',
         'purpose': 'Article Generation',
-        'color': COLORS['primary']
+        'color': COLORS['primary'],
+        'module': 'core.ai_draft_generator',
+        'class': 'DraftGenerator'
     },
     'translator': {
         'display_name': 'David AI Translator',
         'size': '1.2GB',
         'purpose': '200+ Languages Translation',
-        'color': COLORS['warning']
+        'color': COLORS['warning'],
+        'module': 'core.translator',
+        'class': 'Translator'
     },
     'vision_ai': {
         'display_name': 'David AI Vision',
         'size': '2.3GB',
         'purpose': 'Image Watermark Detection',
-        'color': COLORS['danger']
+        'color': COLORS['danger'],
+        'module': 'core.vision_ai',
+        'class': 'VisionAI'
     }
 }
 
@@ -158,6 +166,7 @@ class DatabaseSetup:
                 publish_date TEXT,
                 fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 status TEXT DEFAULT 'new',
+                verified_sources INTEGER DEFAULT 1,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
             )
         ''')
@@ -168,7 +177,10 @@ class DatabaseSetup:
                 workspace_id INTEGER NOT NULL,
                 news_id INTEGER NOT NULL,
                 title TEXT,
+                headline_suggestions TEXT,
                 body_draft TEXT,
+                summary TEXT,
+                word_count INTEGER DEFAULT 0,
                 generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
                 FOREIGN KEY (news_id) REFERENCES news_queue(id)
@@ -182,6 +194,7 @@ class DatabaseSetup:
                 language TEXT,
                 title TEXT,
                 body TEXT,
+                approved BOOLEAN DEFAULT 0,
                 translated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (draft_id) REFERENCES ai_drafts(id)
             )
@@ -196,6 +209,40 @@ class DatabaseSetup:
                 app_password TEXT,
                 connected BOOLEAN DEFAULT 0,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS news_groups (
+                id INTEGER PRIMARY KEY,
+                workspace_id INTEGER NOT NULL,
+                group_hash TEXT,
+                source_count INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS grouped_news (
+                id INTEGER PRIMARY KEY,
+                group_id INTEGER NOT NULL,
+                news_id INTEGER NOT NULL,
+                similarity_score REAL,
+                FOREIGN KEY (group_id) REFERENCES news_groups(id),
+                FOREIGN KEY (news_id) REFERENCES news_queue(id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scraped_facts (
+                id INTEGER PRIMARY KEY,
+                news_id INTEGER NOT NULL,
+                fact_type TEXT,
+                content TEXT,
+                confidence REAL DEFAULT 0.5,
+                source_url TEXT,
+                FOREIGN KEY (news_id) REFERENCES news_queue(id)
             )
         ''')
         
@@ -263,6 +310,9 @@ class NexuzyPublisherApp(tk.Tk):
         self.current_workspace = None
         self.current_workspace_id = None
         
+        # AI Models status
+        self.models_status = {}
+        
         db = DatabaseSetup(self.db_path)
         db.ensure_default_workspace()
         
@@ -272,21 +322,70 @@ class NexuzyPublisherApp(tk.Tk):
         self.show_dashboard()
     
     def _import_modules(self):
+        """Import all core modules and AI models"""
+        # RSS Manager
         try:
             from core.rss_manager import RSSManager
             self.rss_manager = RSSManager(self.db_path)
             logger.info("[OK] RSS Manager loaded")
         except Exception as e:
-            logger.error(f"Module import error: {e}")
+            logger.error(f"RSS Manager error: {e}")
             self.rss_manager = None
         
+        # Vision AI
         try:
             from core.vision_ai import VisionAI
             self.vision_ai = VisionAI()
+            self.models_status['vision_ai'] = 'Available'
             logger.info("[OK] Vision AI loaded")
         except Exception as e:
             logger.warning(f"Vision AI not available: {e}")
             self.vision_ai = None
+            self.models_status['vision_ai'] = 'Not Available'
+        
+        # News Matcher (SentenceTransformer)
+        try:
+            from core.news_matcher import NewsMatchEngine
+            self.news_matcher = NewsMatchEngine(self.db_path)
+            if self.news_matcher.model:
+                self.models_status['sentence_transformer'] = 'Available'
+                logger.info("[OK] News Matcher (SentenceTransformer) loaded")
+            else:
+                self.models_status['sentence_transformer'] = 'Model Not Loaded'
+        except Exception as e:
+            logger.warning(f"News Matcher not available: {e}")
+            self.news_matcher = None
+            self.models_status['sentence_transformer'] = 'Not Available'
+        
+        # Draft Generator (Mistral-7B-GGUF)
+        try:
+            from core.ai_draft_generator import DraftGenerator
+            self.draft_generator = DraftGenerator(self.db_path)
+            if self.draft_generator.llm:
+                self.models_status['draft_generator'] = 'Available (GGUF)'
+                logger.info("[OK] Draft Generator (Mistral-7B-GGUF) loaded")
+            else:
+                self.models_status['draft_generator'] = 'Template Mode'
+                logger.info("[INFO] Draft Generator in template mode")
+        except Exception as e:
+            logger.warning(f"Draft Generator not available: {e}")
+            self.draft_generator = None
+            self.models_status['draft_generator'] = 'Not Available'
+        
+        # Translator (NLLB-200)
+        try:
+            from core.translator import Translator
+            self.translator = Translator(self.db_path)
+            if self.translator.translator:
+                self.models_status['translator'] = 'Available (NLLB-200)'
+                logger.info("[OK] Translator (NLLB-200) loaded")
+            else:
+                self.models_status['translator'] = 'Template Mode'
+                logger.info("[INFO] Translator in template mode")
+        except Exception as e:
+            logger.warning(f"Translator not available: {e}")
+            self.translator = None
+            self.models_status['translator'] = 'Not Available'
     
     def create_modern_ui(self):
         # TOP HEADER
@@ -586,6 +685,7 @@ class NexuzyPublisherApp(tk.Tk):
         
         ModernButton(btn_frame, "Add RSS Feed", self.show_rss_manager, 'primary').pack(side=tk.LEFT, padx=5)
         ModernButton(btn_frame, "View News", self.show_news_queue, 'success').pack(side=tk.LEFT, padx=5)
+        ModernButton(btn_frame, "AI Editor", self.show_editor, 'warning').pack(side=tk.LEFT, padx=5)
         ModernButton(btn_frame, "Vision AI", self.show_vision_ai, 'danger').pack(side=tk.LEFT, padx=5)
     
     def create_stat_card(self, parent, title, value, color):
@@ -724,10 +824,19 @@ class NexuzyPublisherApp(tk.Tk):
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(padx=30, pady=20, anchor=tk.W)
         
+        btn_container = tk.Frame(self.content_frame, bg=COLORS['white'])
+        btn_container.pack(padx=30, pady=10, anchor=tk.W)
+        
         ModernButton(
-            self.content_frame, "Fetch Latest News from RSS",
+            btn_container, "Fetch Latest News from RSS",
             self.fetch_rss_news, 'primary'
-        ).pack(padx=30, pady=10, anchor=tk.W)
+        ).pack(side=tk.LEFT, padx=5)
+        
+        if self.news_matcher:
+            ModernButton(
+                btn_container, "🔍 Group Similar News",
+                self.group_similar_news, 'success'
+            ).pack(side=tk.LEFT, padx=5)
         
         # News list
         list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
@@ -755,7 +864,7 @@ class NexuzyPublisherApp(tk.Tk):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT headline, source_domain, category 
+                SELECT headline, source_domain, category, verified_sources, status 
                 FROM news_queue 
                 WHERE workspace_id = ? 
                 ORDER BY fetched_at DESC 
@@ -767,8 +876,10 @@ class NexuzyPublisherApp(tk.Tk):
             if not news_items:
                 self.news_listbox.insert(tk.END, "No news items yet. Click 'Fetch Latest News from RSS' above!")
             else:
-                for headline, source, category in news_items:
-                    self.news_listbox.insert(tk.END, f"[{category}] {source}: {headline}")
+                for headline, source, category, verified_sources, status in news_items:
+                    verified_tag = f"[{verified_sources} sources]" if verified_sources > 1 else ""
+                    status_tag = f"[{status.upper()}]" if status != 'new' else ""
+                    self.news_listbox.insert(tk.END, f"{status_tag} [{category}] {source}: {headline} {verified_tag}")
         except Exception as e:
             self.news_listbox.insert(tk.END, f"Error: {e}")
     
@@ -801,8 +912,34 @@ class NexuzyPublisherApp(tk.Tk):
         self.update_status("Error fetching news", 'danger')
         messagebox.showerror("Error", f"Failed to fetch news:\n{error}")
     
+    def group_similar_news(self):
+        """Group similar news using AI News Matcher"""
+        if not self.news_matcher:
+            messagebox.showerror("Error", "News Matcher not available")
+            return
+        
+        self.update_status("Grouping similar news with AI...", 'warning')
+        
+        def group_thread():
+            try:
+                groups = self.news_matcher.group_similar_headlines(self.current_workspace_id)
+                self.after(0, lambda: self._group_complete(groups))
+            except Exception as e:
+                self.after(0, lambda: self._group_error(str(e)))
+        
+        threading.Thread(target=group_thread, daemon=True).start()
+    
+    def _group_complete(self, groups):
+        self.update_status(f"Created {len(groups)} news groups", 'success')
+        self.load_news_queue()
+        messagebox.showinfo("Success", f"Grouped news into {len(groups)} similar event groups!")
+    
+    def _group_error(self, error):
+        self.update_status("Error grouping news", 'danger')
+        messagebox.showerror("Error", f"Failed to group news:\n{error}")
+    
     def show_editor(self):
-        """AI Draft Editor - Shows fetched news and generates drafts with images"""
+        """AI Draft Editor - Shows fetched news and generates drafts with AI models"""
         self.clear_content()
         self.update_status("AI Draft Editor", 'success')
         
@@ -817,9 +954,10 @@ class NexuzyPublisherApp(tk.Tk):
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(padx=30, pady=20, anchor=tk.W)
         
+        model_status = self.models_status.get('draft_generator', 'Not Available')
         tk.Label(
             self.content_frame,
-            text="Select news to generate AI-powered drafts with David AI Writer 7B.",
+            text=f"Generate AI-powered drafts with David AI Writer 7B ({model_status}).",
             font=('Segoe UI', 11),
             bg=COLORS['white'], fg=COLORS['text_light']
         ).pack(padx=30, pady=5, anchor=tk.W)
@@ -860,7 +998,7 @@ class NexuzyPublisherApp(tk.Tk):
         
         ModernButton(
             btn_frame, "🤖 Generate AI Draft",
-            self.generate_ai_draft, 'success'
+            self.generate_ai_draft_real, 'success'
         ).pack(fill=tk.X, pady=2)
         
         ModernButton(
@@ -1018,11 +1156,11 @@ class NexuzyPublisherApp(tk.Tk):
             if news['summary']:
                 content += f"Summary:\n{news['summary']}\n\n"
             content += f"URL: {news['url']}\n\n"
-            content += "Click 'Generate AI Draft' to create article..."
+            content += "Click 'Generate AI Draft' to create article with David AI Writer 7B..."
             self.draft_body.insert(tk.END, content)
     
-    def generate_ai_draft(self):
-        """Generate AI draft from selected news"""
+    def generate_ai_draft_real(self):
+        """Generate AI draft using real DraftGenerator model"""
         if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
             messagebox.showwarning("Warning", "No news list available")
             return
@@ -1037,56 +1175,44 @@ class NexuzyPublisherApp(tk.Tk):
             return
         
         news = self.news_items_data[idx]
+        news_id = news['id']
         
-        self.update_status("Generating AI draft...", 'warning')
+        if not self.draft_generator:
+            messagebox.showerror("Error", "Draft Generator not available. Install: pip install ctransformers")
+            return
         
-        # AI draft generation with images
-        draft_title = news['headline']
-        draft_body = f"""# {news['headline']}
-
-## Introduction
-
-{news['summary']}
-
-This article explores the latest developments in {news['category'].lower()}.
-
-## Main Content
-
-According to {news['source']}, recent events have shown significant importance in this area. The situation continues to evolve as more information becomes available.
-
-### Key Points
-
-- Important development in {news['category']}
-- Expert analysis and insights
-- Impact on industry and stakeholders
-- Future implications and trends
-
-## Analysis
-
-Our AI analysis suggests that this development could have far-reaching consequences. Industry experts are closely monitoring the situation for further updates.
-
-## Conclusion
-
-As this story develops, we will continue to provide updates and in-depth coverage. Stay tuned for more information.
-
----
-
-**Source:** {news['source']}  
-**Read more:** {news['url']}
-**Category:** {news['category']}
-**Generated by:** David AI Writer 7B
-"""
+        self.update_status("Generating AI draft with David AI Writer 7B...", 'warning')
+        
+        def generate_thread():
+            try:
+                draft = self.draft_generator.generate_draft(news_id)
+                self.after(0, lambda: self._draft_generated(draft, news))
+            except Exception as e:
+                self.after(0, lambda: self._draft_error(str(e)))
+        
+        threading.Thread(target=generate_thread, daemon=True).start()
+    
+    def _draft_generated(self, draft, news):
+        """Handle generated draft"""
+        if not draft:
+            messagebox.showerror("Error", "Failed to generate draft")
+            return
         
         if hasattr(self, 'draft_title'):
             self.draft_title.delete(0, tk.END)
-            self.draft_title.insert(0, draft_title)
+            self.draft_title.insert(0, draft.get('title', news['headline']))
         
         if hasattr(self, 'draft_body'):
             self.draft_body.delete('1.0', tk.END)
-            self.draft_body.insert(tk.END, draft_body)
+            body = draft.get('body_draft', 'No content generated')
+            self.draft_body.insert(tk.END, body)
         
         self.update_status("AI draft generated successfully!", 'success')
-        messagebox.showinfo("Success", "AI draft generated! You can now edit and save it.")
+        messagebox.showinfo("Success", f"AI draft generated! Word count: {draft.get('word_count', 0)}")
+    
+    def _draft_error(self, error):
+        self.update_status("Draft generation error", 'danger')
+        messagebox.showerror("Error", f"Failed to generate draft:\n{error}")
     
     def save_ai_draft(self):
         """Save AI draft to database"""
@@ -1158,8 +1284,13 @@ As this story develops, we will continue to provide updates and in-depth coverag
         self.update_status("Draft editor cleared", 'primary')
     
     def show_translations(self):
+        """Translation Manager with real NLLB-200 model"""
         self.clear_content()
         self.update_status("Translation Manager", 'warning')
+        
+        if not self.current_workspace_id:
+            self._show_no_workspace_error()
+            return
         
         tk.Label(
             self.content_frame, text="Translation Manager",
@@ -1167,29 +1298,49 @@ As this story develops, we will continue to provide updates and in-depth coverag
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(padx=30, pady=20, anchor=tk.W)
         
+        model_status = self.models_status.get('translator', 'Not Available')
         tk.Label(
             self.content_frame,
-            text="Translate articles using David AI Translator (200+ languages).",
+            text=f"Translate articles using David AI Translator ({model_status}) - 200+ languages.",
             font=('Segoe UI', 11),
             bg=COLORS['white'], fg=COLORS['text_light']
         ).pack(padx=30, pady=10, anchor=tk.W)
         
+        # Draft selection
+        select_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
+        select_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
+        
+        tk.Label(select_frame, text="Select Draft:", bg=COLORS['light'], font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=10)
+        
+        self.draft_var = tk.StringVar(value="No drafts")
+        self.draft_selector = ttk.Combobox(
+            select_frame, textvariable=self.draft_var,
+            state='readonly', width=50
+        )
+        self.draft_selector.pack(side=tk.LEFT, padx=5)
+        
+        ModernButton(
+            select_frame, "🔄 Refresh Drafts",
+            self.load_translation_drafts, 'primary'
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Language selection
         lang_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
-        lang_frame.pack(fill=tk.X, padx=30, pady=20, ipady=15)
+        lang_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
         
-        tk.Label(lang_frame, text="Target Language:", bg=COLORS['light']).pack(side=tk.LEFT, padx=10)
+        tk.Label(lang_frame, text="Target Language:", bg=COLORS['light'], font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT, padx=10)
         
-        lang_var = tk.StringVar(value='Spanish')
+        self.lang_var = tk.StringVar(value='Spanish')
         lang_menu = ttk.Combobox(
-            lang_frame, textvariable=lang_var,
+            lang_frame, textvariable=self.lang_var,
             values=TRANSLATION_LANGUAGES,
             state='readonly', width=25
         )
         lang_menu.pack(side=tk.LEFT, padx=5)
         
         ModernButton(
-            lang_frame, "Translate Now",
-            lambda: messagebox.showinfo("Info", f"Translation to {lang_var.get()} will start..."),
+            lang_frame, "🌐 Translate Now",
+            self.translate_draft_real,
             'warning'
         ).pack(side=tk.LEFT, padx=10)
         
@@ -1203,12 +1354,88 @@ As this story develops, we will continue to provide updates and in-depth coverag
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(anchor=tk.W, pady=10)
         
-        preview_text = scrolledtext.ScrolledText(
+        self.translation_text = scrolledtext.ScrolledText(
             preview_frame, font=('Segoe UI', 10),
             wrap=tk.WORD, height=15
         )
-        preview_text.pack(fill=tk.BOTH, expand=True)
-        preview_text.insert(tk.END, "Translated text will appear here...")
+        self.translation_text.pack(fill=tk.BOTH, expand=True)
+        self.translation_text.insert(tk.END, "Translated text will appear here...")
+        
+        # Load drafts
+        self.load_translation_drafts()
+    
+    def load_translation_drafts(self):
+        """Load available drafts for translation"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, title FROM ai_drafts 
+                WHERE workspace_id = ? 
+                ORDER BY generated_at DESC 
+                LIMIT 50
+            ''', (self.current_workspace_id,))
+            drafts = cursor.fetchall()
+            conn.close()
+            
+            if drafts:
+                self.draft_ids = [d[0] for d in drafts]
+                titles = [f"#{d[0]}: {d[1][:50]}" for d in drafts]
+                self.draft_selector['values'] = titles
+                self.draft_selector.current(0)
+            else:
+                self.draft_selector['values'] = ["No drafts available"]
+        except Exception as e:
+            logger.error(f"Error loading drafts: {e}")
+    
+    def translate_draft_real(self):
+        """Translate draft using real NLLB-200 model"""
+        if not self.translator:
+            messagebox.showerror("Error", "Translator not available. Install: pip install transformers")
+            return
+        
+        if not hasattr(self, 'draft_ids') or not self.draft_ids:
+            messagebox.showwarning("Warning", "No drafts available to translate")
+            return
+        
+        draft_idx = self.draft_selector.current()
+        if draft_idx < 0 or draft_idx >= len(self.draft_ids):
+            messagebox.showwarning("Warning", "Please select a draft")
+            return
+        
+        draft_id = self.draft_ids[draft_idx]
+        target_lang = self.lang_var.get()
+        
+        self.update_status(f"Translating to {target_lang} with NLLB-200...", 'warning')
+        
+        def translate_thread():
+            try:
+                translation = self.translator.translate_draft(draft_id, target_lang)
+                self.after(0, lambda: self._translation_complete(translation))
+            except Exception as e:
+                self.after(0, lambda: self._translation_error(str(e)))
+        
+        threading.Thread(target=translate_thread, daemon=True).start()
+    
+    def _translation_complete(self, translation):
+        """Handle completed translation"""
+        if not translation:
+            messagebox.showerror("Error", "Translation failed")
+            return
+        
+        if hasattr(self, 'translation_text'):
+            self.translation_text.delete('1.0', tk.END)
+            output = f"Title: {translation.get('title', '')}\n\n"
+            output += "=" * 60 + "\n\n"
+            output += translation.get('body', '')
+            self.translation_text.insert(tk.END, output)
+        
+        self.update_status(f"Translated to {translation.get('language', '')}", 'success')
+        messagebox.showinfo("Success", f"Translation to {translation.get('language', '')} complete!")
+    
+    def _translation_error(self, error):
+        self.update_status("Translation error", 'danger')
+        messagebox.showerror("Error", f"Translation failed:\n{error}")
     
     def show_wordpress_config(self):
         """WordPress Integration with proper save functionality"""
@@ -1375,9 +1602,10 @@ As this story develops, we will continue to provide updates and in-depth coverag
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(padx=30, pady=20, anchor=tk.W)
         
+        model_status = self.models_status.get('vision_ai', 'Not Available')
         tk.Label(
             self.content_frame,
-            text="Analyze news article images for watermarks using David AI Vision.",
+            text=f"Analyze news article images for watermarks using David AI Vision ({model_status}).",
             font=('Segoe UI', 11),
             bg=COLORS['white'], fg=COLORS['text_light']
         ).pack(padx=30, pady=10, anchor=tk.W)
@@ -1476,6 +1704,7 @@ As this story develops, we will continue to provide updates and in-depth coverag
         messagebox.showerror("Error", f"Vision AI error:\n{error}")
     
     def show_settings(self):
+        """Settings & AI Models Status"""
         self.clear_content()
         self.update_status("Settings & AI Models", 'text_light')
         
@@ -1495,9 +1724,10 @@ As this story develops, we will continue to provide updates and in-depth coverag
         ).pack(padx=20, pady=15, anchor=tk.W)
         
         for model_key, config in MODEL_CONFIGS.items():
-            self.create_model_status_card(models_frame, config)
+            status = self.models_status.get(model_key, 'Unknown')
+            self.create_model_status_card(models_frame, config, status)
     
-    def create_model_status_card(self, parent, config):
+    def create_model_status_card(self, parent, config, status):
         card = tk.Frame(parent, bg=COLORS['white'], relief=tk.RAISED, borderwidth=1)
         card.pack(fill=tk.X, padx=20, pady=10)
         
@@ -1516,10 +1746,12 @@ As this story develops, we will continue to provide updates and in-depth coverag
             bg=COLORS['white'], fg=COLORS['text']
         ).pack(side=tk.LEFT)
         
+        # Status badge
+        status_color = COLORS['success'] if 'Available' in status else COLORS['warning']
         tk.Label(
-            top_row, text="Available",
+            top_row, text=status,
             font=('Segoe UI', 10, 'bold'),
-            bg=config['color'], fg=COLORS['white'],
+            bg=status_color, fg=COLORS['white'],
             padx=10, pady=2
         ).pack(side=tk.RIGHT)
         
