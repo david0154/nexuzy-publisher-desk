@@ -1,36 +1,18 @@
-# Nexuzy Publisher Desk - Python Dependencies
-# Fixed version constraints for compatibility
-
-# NumPy - Must be <2.0 for compatibility with torch
+# Core AI/ML Dependencies
 numpy>=1.24.0,<2.0.0
-
-# Core dependencies with version constraints
-transformers>=4.36.0,<4.45.0
-sentence-transformers>=2.2.2,<3.0.0
-
-# GGUF model support (CPU-optimized, Pure Python)
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
 ctransformers>=0.2.27
 
-# PyTorch - Compatible with NumPy 1.x
-torch>=2.1.0,<2.5.0
-
-# HuggingFace model downloads
-huggingface_hub>=0.19.4
-
-# RSS & Web
+# RSS and Web Scraping
 feedparser>=6.0.10
+beautifulsoup4>=4.12.0
 requests>=2.31.0
-beautifulsoup4>=4.12.2
-lxml>=4.9.3
 
-# UI
-pillow>=10.1.0
+# Database
+sqlite3
 
-# Database (sqlite3 is built-in)
-
-# Build
-pyinstaller>=6.1.0
-
-# Utilities
-python-dotenv>=1.0.0
-colorama>=0.4.6
+# Optional: Translation (uncomment if using)
+# sentencepiece>=0.1.99
+# sacremoses>=0.0.53
