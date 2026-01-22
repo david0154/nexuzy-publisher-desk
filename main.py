@@ -1,7 +1,7 @@
 """
 Nexuzy Publisher Desk - Main Entry Point
 Complete offline AI-powered news publishing application
-Built with Python, Tkinter, and offline AI models
+Built with Python, Tkinter, and offline AI models (GGUF format)
 """
 
 import os
@@ -26,27 +26,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# AUTO-DOWNLOADER FOR AI MODELS (First Run) - SMALLER MODELS
+# AUTO-DOWNLOADER FOR AI MODELS (First Run) - GGUF FORMAT (SMALLEST)
 # ============================================================================
 
 class ModelDownloader:
-    """Auto-download AI models on first run - Using smaller, optimized models"""
+    """Auto-download AI models on first run - Using GGUF quantized models (smallest)"""
     
     MODEL_CONFIG = {
         'sentence-transformers/all-MiniLM-L6-v2': {
             'name': 'SentenceTransformer',
             'size': '80MB',
-            'use': 'News matching & similarity'
+            'use': 'News matching & similarity',
+            'type': 'standard'
         },
-        'TheBloke/Mistral-7B-Instruct-v0.2-GPTQ': {
-            'name': 'Mistral-7B-GPTQ',
-            'size': '4GB',  # 80% smaller than original
-            'use': 'Draft generation (quantized)'
+        'TheBloke/Mistral-7B-Instruct-v0.2-GGUF': {
+            'name': 'Mistral-7B-GGUF',
+            'size': '4.1GB',  # Q4_K_M quantization
+            'file': 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+            'use': 'Draft generation (GGUF quantized)',
+            'type': 'gguf'
         },
-        'facebook/nllb-200-distilled-600M': {
-            'name': 'NLLB-200-Distilled',
-            'size': '1.2GB',  # Distilled version
-            'use': 'Multi-language translation'
+        'QuantFactory/nllb-200-distilled-600M-GGUF': {
+            'name': 'NLLB-200-GGUF',
+            'size': '800MB',  # Q4_K_M quantization
+            'file': 'nllb-200-distilled-600M.Q4_K_M.gguf',
+            'use': 'Multi-language translation (GGUF)',
+            'type': 'gguf'
         }
     }
     
@@ -77,11 +82,12 @@ class ModelDownloader:
             if model_name not in config:
                 logger.info(f"Downloading {model_name} ({model_info['size']})...")
                 try:
-                    self._download_model(model_id, model_name)
+                    self._download_model(model_id, model_name, model_info)
                     config[model_name] = {
                         'model_id': model_id,
                         'downloaded': True,
-                        'size': model_info['size']
+                        'size': model_info['size'],
+                        'type': model_info.get('type', 'standard')
                     }
                     self.save_config(config)
                     logger.info(f"✓ {model_name} downloaded successfully")
@@ -91,41 +97,40 @@ class ModelDownloader:
         
         return True
     
-    def _download_model(self, model_id, model_name):
+    def _download_model(self, model_id, model_name, model_info):
         """Download model from HuggingFace"""
         try:
-            from sentence_transformers import SentenceTransformer
-            from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
+            model_type = model_info.get('type', 'standard')
             
-            if 'SentenceTransformer' in model_name:
+            if model_type == 'gguf':
+                # Download GGUF file
+                from huggingface_hub import hf_hub_download
+                
+                logger.info(f"Downloading GGUF model: {model_id}")
+                gguf_file = model_info.get('file')
+                
+                # Download the specific GGUF file
+                local_path = hf_hub_download(
+                    repo_id=model_id,
+                    filename=gguf_file,
+                    cache_dir=str(self.models_dir),
+                    local_dir=str(self.models_dir / model_id.replace('/', '_')),
+                    local_dir_use_symlinks=False
+                )
+                
+                logger.info(f"GGUF file saved to: {local_path}")
+            
+            elif 'SentenceTransformer' in model_name:
+                from sentence_transformers import SentenceTransformer
+                
                 logger.info(f"Loading SentenceTransformer: {model_id}")
                 model = SentenceTransformer(model_id, cache_folder=str(self.models_dir))
                 model.save(str(self.models_dir / model_id.replace('/', '_')))
-            
-            elif 'Mistral' in model_name or 'GPTQ' in model_name:
-                logger.info(f"Loading quantized Mistral model: {model_id}")
-                # GPTQ quantized model - much smaller
-                from auto_gptq import AutoGPTQForCausalLM
-                tokenizer = AutoTokenizer.from_pretrained(model_id)
-                model = AutoGPTQForCausalLM.from_quantized(
-                    model_id,
-                    device="cuda:0" if self._has_gpu() else "cpu",
-                    use_safetensors=True
-                )
-                tokenizer.save_pretrained(str(self.models_dir / model_id.replace('/', '_')))
-                model.save_pretrained(str(self.models_dir / model_id.replace('/', '_')))
-            
-            elif 'nllb' in model_id.lower():
-                logger.info(f"Loading NLLB distilled model: {model_id}")
-                tokenizer = AutoTokenizer.from_pretrained(model_id)
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
-                tokenizer.save_pretrained(str(self.models_dir / model_id.replace('/', '_')))
-                model.save_pretrained(str(self.models_dir / model_id.replace('/', '_')))
         
         except ImportError as e:
             logger.error(f"Required library not installed: {e}")
-            logger.info("Installing auto-gptq for quantized models...")
-            os.system('pip install auto-gptq')
+            logger.info("Installing huggingface_hub for GGUF downloads...")
+            os.system('pip install huggingface_hub')
             raise
     
     @staticmethod
@@ -1136,12 +1141,12 @@ class NexuzyPublisherApp(tk.Tk):
         settings_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Model status
-        tk.Label(settings_frame, text="AI Models Status:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=10)
+        tk.Label(settings_frame, text="AI Models Status (GGUF Format):", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=10)
         
         models = [
             ("SentenceTransformer (80MB)", "News Matching"),
-            ("Mistral-7B-GPTQ (4GB)", "Draft Generation - Quantized"),
-            ("NLLB-200-Distilled (1.2GB)", "Translation - Optimized")
+            ("Mistral-7B-GGUF Q4_K_M (4.1GB)", "Draft Generation - GGUF Quantized"),
+            ("NLLB-200-GGUF Q4_K_M (800MB)", "Translation - GGUF Optimized")
         ]
         
         for model_name, purpose in models:
@@ -1151,7 +1156,7 @@ class NexuzyPublisherApp(tk.Tk):
             tk.Label(status_frame, text=f"   Purpose: {purpose}", font=('Arial', 8), fg='gray').pack(anchor=tk.W)
         
         # Total size
-        tk.Label(settings_frame, text="\nTotal Model Size: ~5.3GB (80% smaller than original)", font=('Arial', 9, 'bold'), fg='#27ae60').pack(anchor=tk.W, pady=10)
+        tk.Label(settings_frame, text="\nTotal Model Size: ~5GB (GGUF format - CPU optimized)", font=('Arial', 9, 'bold'), fg='#27ae60').pack(anchor=tk.W, pady=10)
         
         # Cache directory
         tk.Label(settings_frame, text=f"\nModel Cache Directory:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=10)
@@ -1182,13 +1187,13 @@ def main():
     logger.info("=" * 60)
     
     # Check and download models on first run
-    logger.info("Checking AI models...")
+    logger.info("Checking AI models (GGUF format)...")
     downloader = ModelDownloader()
     
     def download_models_async():
         """Download models in background thread"""
         if downloader.check_and_download():
-            logger.info("✓ All AI models ready")
+            logger.info("✓ All AI models ready (GGUF)")
         else:
             logger.warning("⚠ Some models failed to download, app will run in limited mode")
     
