@@ -1,15 +1,18 @@
 # Nexuzy Publisher Desk - Python Dependencies
-# Updated with quantized model support for 80% size reduction
+# Updated with GGUF model support for maximum size reduction
 
 # Core dependencies
 transformers==4.36.0
-torch==2.1.1
 sentence-transformers==2.2.2
 
-# GPTQ quantization for smaller models
-auto-gptq==0.7.1
-optimum==1.16.1
-accelerate==0.25.0
+# GGUF model support (CPU-optimized, smallest format)
+llama-cpp-python==0.2.27
+
+# For translation (will use GGUF if available, else fallback)
+torch==2.1.1
+
+# HuggingFace model downloads
+huggingface_hub==0.19.4
 
 # RSS & Web
 feedparser==6.0.10
