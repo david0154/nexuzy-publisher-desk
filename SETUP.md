@@ -1,388 +1,327 @@
-# 🚀 Nexuzy Publisher Desk - Setup Guide
+# Setup Guide - Development Environment
 
-## Quick Start (5 Minutes)
+## 🛠️ Quick Setup (5 Minutes)
 
-### Windows Users
-1. Download `NexuzyPublisherDesk.exe` 
-2. Double-click to launch
-3. Wait for models to download (first run only, ~30-40 min)
-4. Create workspace
-5. Add RSS feeds
-6. Start publishing!
+### Prerequisites
 
-### Developer Setup (Build from Source)
+- **Python 3.9 - 3.11** (⚠️ **NOT 3.13** - llama-cpp-python compatibility issues)
+- **Git** - For cloning repository
+- **8GB+ RAM** - Recommended for AI models
+- **~10GB disk space** - 5GB models + workspace
 
-#### Prerequisites
-- Windows 10/11 or Linux/Mac
-- Python 3.9 - 3.11
-- 16GB RAM
-- 30GB free disk space
-- Git
+---
 
-#### Installation Steps
+## 🚀 Installation Steps
+
+### Step 1: Clone Repository
 
 ```bash
-# 1. Clone repository
 git clone https://github.com/david0154/nexuzy-publisher-desk.git
 cd nexuzy-publisher-desk
+```
 
-# 2. Create virtual environment
+### Step 2: Create Virtual Environment
+
+**Windows:**
+```bash
 python -m venv venv
-
-# Windows:
 venv\Scripts\activate
+```
 
-# Linux/Mac:
+**Linux/Mac:**
+```bash
+python3 -m venv venv
 source venv/bin/activate
+```
 
-# 3. Install dependencies
+### Step 3: Install llama-cpp-python (Pre-Built Wheel)
+
+⚠️ **IMPORTANT:** Install this FIRST before requirements.txt
+
+**Windows (CPU-only - Recommended):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+**Windows (NVIDIA GPU - CUDA 12.1):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+```
+
+**Linux (CPU-only):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+**Linux (NVIDIA GPU - CUDA 12.1):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+```
+
+**macOS (CPU-only):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+**macOS (Metal GPU Acceleration):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal
+```
+
+### Step 4: Install Other Dependencies
+
+```bash
 pip install -r requirements.txt
-
-# 4. Run application (models download automatically)
-python main.py
 ```
 
-#### First Run (Model Download)
-
-On first launch, the app automatically downloads:
-- **SentenceTransformer** (80 MB) - for news matching
-- **Mistral-7B** (14 GB or 4GB quantized) - for draft generation  
-- **NLLB-200** (2.4 GB) - for translation
-
-**Console Output:**
+**Expected output:**
 ```
-2026-01-22 14:30:00 - INFO - Starting Nexuzy Publisher Desk...
-2026-01-22 14:30:01 - INFO - Checking AI models...
-2026-01-22 14:30:02 - INFO - Downloading SentenceTransformer...
-✓ SentenceTransformer downloaded successfully
-2026-01-22 14:31:45 - INFO - Downloading Mistral-7B...
-... (15-20 minutes)
-✓ Mistral-7B downloaded successfully
-2026-01-22 14:51:22 - INFO - Downloading NLLB-200...
-... (5-10 minutes)
-✓ NLLB-200 downloaded successfully
-2026-01-22 15:02:15 - INFO - ✓ All AI models ready
-2026-01-22 15:02:16 - INFO - Database initialized successfully
+Collecting transformers>=4.36.0...
+Collecting sentence-transformers>=2.2.2...
+Collecting torch>=2.1.0...
+...
+Successfully installed transformers-4.57.6 torch-2.10.0 ...
+```
+
+### Step 5: Verify Installation
+
+```bash
+python -c "import llama_cpp; print('llama-cpp-python:', llama_cpp.__version__)"
+python -c "import transformers; print('transformers:', transformers.__version__)"
+python -c "import torch; print('torch:', torch.__version__)"
+```
+
+**Expected output:**
+```
+llama-cpp-python: 0.3.x
+transformers: 4.57.x
+torch: 2.10.x
 ```
 
 ---
 
-## Building Windows EXE
+## 🏃 Run Application
 
-### Step 1: Prepare Environment
 ```bash
-# From project directory
+python main.py
+```
+
+**First Run:**
+- Models will auto-download (~5GB)
+- Takes 15-20 minutes
+- Internet connection required
+
+**Subsequent Runs:**
+- Instant startup from cached models
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue 1: Python 3.13 Compatibility
+
+**Error:** `llama-cpp-python` not available for Python 3.13
+
+**Solution:**
+```bash
+# Uninstall Python 3.13
+# Install Python 3.11 from python.org
+python --version  # Should show 3.11.x
+
+# Recreate venv
+rmdir /s /q venv  # Windows
+rm -rf venv       # Linux/Mac
+
+python -m venv venv
+venv\Scripts\activate  # Windows
+source venv/bin/activate  # Linux/Mac
+
+# Reinstall dependencies
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+pip install -r requirements.txt
+```
+
+### Issue 2: llama-cpp-python Build Fails
+
+**Error:** `CMAKE_C_COMPILER not set` or `nmake not found`
+
+**Solution:** Use pre-built wheel (see Step 3)
+
+```bash
+# DO NOT use pip install llama-cpp-python
+# ALWAYS use pre-built wheel:
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+### Issue 3: torch Version Conflict
+
+**Error:** `No matching distribution found for torch==2.1.1`
+
+**Solution:** Already fixed in requirements.txt (uses `>=2.1.0`)
+
+```bash
+git pull origin main
+pip install -r requirements.txt
+```
+
+### Issue 4: Import Error After Installation
+
+**Error:** `ModuleNotFoundError: No module named 'llama_cpp'`
+
+**Solution:**
+```bash
+# Verify venv is activated
+where python  # Should point to venv\Scripts\python.exe
+
+# Reinstall llama-cpp-python
+pip uninstall llama-cpp-python
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+### Issue 5: Models Not Downloading
+
+**Error:** Application starts but models don't download
+
+**Solution:**
+```bash
+# Check internet connection
+ping huggingface.co
+
+# Manually download models
+python -c "from huggingface_hub import hf_hub_download; hf_hub_download('TheBloke/Mistral-7B-Instruct-v0.2-GGUF', 'mistral-7b-instruct-v0.2.Q4_K_M.gguf', cache_dir='models')"
+```
+
+---
+
+## 📚 Additional Resources
+
+### Documentation
+
+- [QUICK_START.md](QUICK_START.md) - 5-minute usage guide
+- [FEATURES.md](FEATURES.md) - Complete feature list
+- [WORDPRESS_SETUP.md](WORDPRESS_SETUP.md) - WordPress integration
+- [AI_MODELS.md](AI_MODELS.md) - AI model details
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Building EXE
+
+### Python Version Compatibility
+
+| Python Version | Status | Notes |
+|----------------|--------|-------|
+| 3.9 | ✅ Fully Supported | Recommended |
+| 3.10 | ✅ Fully Supported | Recommended |
+| 3.11 | ✅ Fully Supported | **Best Choice** |
+| 3.12 | ⚠️ Limited | Some packages may have issues |
+| 3.13 | ❌ Not Supported | llama-cpp-python unavailable |
+
+### GPU Acceleration
+
+**NVIDIA GPU (CUDA):**
+```bash
+# Install CUDA-enabled torch
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Install CUDA-enabled llama-cpp-python
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+```
+
+**AMD GPU (ROCm - Linux only):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/rocm
+```
+
+**Apple Silicon (Metal):**
+```bash
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal
+```
+
+---
+
+## 🔧 Development Setup
+
+### Install Development Dependencies
+
+```bash
+# Install all dependencies including dev tools
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+pip install -r requirements.txt
+
+# Install dev tools
+pip install black flake8 pytest
+```
+
+### Code Formatting
+
+```bash
+# Format code
+black .
+
+# Check linting
+flake8 .
+```
+
+### Testing
+
+```bash
+# Run tests (when available)
+pytest tests/
+```
+
+---
+
+## 💻 IDE Setup
+
+### Visual Studio Code
+
+1. Install Python extension
+2. Select venv interpreter:
+   - `Ctrl+Shift+P` → "Python: Select Interpreter"
+   - Choose `./venv/Scripts/python.exe`
+
+3. Recommended extensions:
+   - Python (Microsoft)
+   - Pylance
+   - autopep8
+
+### PyCharm
+
+1. Open project folder
+2. File → Settings → Project → Python Interpreter
+3. Add interpreter → Existing environment
+4. Select `venv\Scripts\python.exe`
+
+---
+
+## 🚀 Quick Start Commands
+
+```bash
+# Full setup from scratch
+git clone https://github.com/david0154/nexuzy-publisher-desk.git
+cd nexuzy-publisher-desk
 python -m venv venv
 venv\Scripts\activate
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 pip install -r requirements.txt
-pip install pyinstaller
-```
-
-### Step 2: Create Logo (Optional)
-Place icon file at: `resources/logo.ico`
-
-### Step 3: Build EXE
-```bash
-pyinstaller build_config.spec
-```
-
-**Output**: `dist/NexuzyPublisherDesk.exe`
-
-### Step 4: Test Build
-```bash
-# Navigate to dist folder
-cd dist
-NexuzyPublisherDesk.exe
-```
-
-**⚠️ Note**: EXE is ~500MB+. First run still downloads models (~30GB total with models).
-
----
-
-## GPU Acceleration Setup
-
-### NVIDIA CUDA (Recommended for Fast Generation)
-
-```bash
-# Install CUDA
-# 1. Download from: https://developer.nvidia.com/cuda-downloads
-# 2. Install CUDA 11.8 or 12.x
-# 3. Verify installation
-cuda-samples\1_Utilities\deviceQuery\deviceQuery.exe
-
-# Install PyTorch with CUDA
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-
-# Reinstall other packages
-pip install -r requirements.txt
-```
-
-### AMD ROCm
-
-```bash
-# Install ROCm
-# 1. Download from: https://rocmdocs.amd.com/en/docs/deploy/windows/
-# 2. Install ROCm
-
-# Install PyTorch with ROCm
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm5.7
-```
-
-### Apple Silicon (M1/M2/M3)
-
-```bash
-# PyTorch with Metal
-pip install torch torchvision torchaudio
-```
-
-**After GPU setup**, restart application for automatic GPU detection.
-
----
-
-## Directory Structure After Setup
-
-```
-nexuzy-publisher-desk/
-├── main.py
-├── core/
-├── models/                          ← Models downloaded here
-├── resources/
-├── nexuzy.db                        ← Created on first run
-├── nexuzy_publisher.log              ← Created on first run
-├── venv/                              ← Virtual environment
-├── build/                            ← PyInstaller intermediate
-├── dist/                             ← Output EXE
-└── README.md
-```
-
----
-
-## Troubleshooting Setup
-
-### Problem: Models Not Downloading
-
-**Solution 1: Manual Download**
-```bash
-python -c "from main import ModelDownloader; ModelDownloader().check_and_download()"
-```
-
-**Solution 2: Check Disk Space**
-```bash
-# Windows
-dir C:\ 
-
-# Linux/Mac
-df -h
-```
-Need at least 30GB free.
-
-**Solution 3: Network Issues**
-- Check internet connection
-- Try VPN if HuggingFace is blocked
-- Download manually from HuggingFace:
-  - https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
-  - https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1
-  - https://huggingface.co/facebook/nllb-200-distilled-600M
-
-### Problem: Out of Memory
-
-**Solutions:**
-1. Close other applications
-2. Install GPU support (CUDA/ROCm)
-3. Use lighter models (already using distilled versions)
-4. Process fewer articles at once
-5. Increase virtual memory (Windows):
-   - Settings > System > Advanced system settings > Performance > Virtual memory
-
-### Problem: ModuleNotFoundError
-
-```bash
-# Reinstall all dependencies
-pip install --upgrade pip
-pip install -r requirements.txt --force-reinstall
-```
-
-### Problem: Tkinter Not Found (Linux)
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install python3-tk
-
-# Fedora
-sudo dnf install python3-tkinter
-
-# Arch
-sudo pacman -S tk
-```
-
-### Problem: PyInstaller Build Fails
-
-```bash
-# Clean and rebuild
-rmdir /s build
-rmdir /s dist
-pyinstaller --clean build_config.spec
-```
-
----
-
-## Initial Configuration
-
-### 1. First Launch
-```bash
 python main.py
 ```
 
-### 2. Create Workspace
-- Click "+ New Workspace"
-- Name: e.g., "Tech News Desk"
-- Click Create
-
-### 3. Add RSS Feeds
-- Click "RSS Manager"
-- Click "+ Add Feed"
-- Paste RSS URL
-- Select category, language, priority
-- Click "Save Feed"
-
-### 4. Configure WordPress (Optional)
-- Click "WordPress"
-- Enter site URL (e.g., `https://myblog.com`)
-- Enter username
-- Enter application password (generate in WordPress)
-- Click "Test Connection"
-- Click "Save"
+**Copy-paste this entire block!** ✅
 
 ---
 
-## Performance Optimization
+## 💬 Support
 
-### Low-End Hardware (8GB RAM)
+If you encounter issues:
 
-1. **Disable translation** initially
-2. **Process one article at a time**
-3. **Install GPU acceleration**
-4. **Clear old articles** periodically
-
-### Recommended Hardware (16GB RAM)
-
-1. **Process 5-10 articles** simultaneously
-2. **Enable all features**
-3. **Run smooth operation**
-
-### High-End Hardware (32GB+ RAM, GPU)
-
-1. **Batch process 50+ articles**
-2. **Enable real-time translation**
-3. **Run multiple workspaces**
+1. Check [Troubleshooting](#-troubleshooting) above
+2. Search [GitHub Issues](https://github.com/david0154/nexuzy-publisher-desk/issues)
+3. Open new issue with:
+   - Python version: `python --version`
+   - OS: Windows/Linux/Mac
+   - Error message
+   - Full traceback
 
 ---
 
-## Logs & Debugging
+**Last Updated:** January 22, 2026
 
-### View Logs
-```bash
-# Console output during run
-python main.py
-
-# Persistent log file
-type nexuzy_publisher.log  # Windows
-cat nexuzy_publisher.log   # Linux/Mac
-
-# Real-time log follow
-tail -f nexuzy_publisher.log
-```
-
-### Debug Mode
-```bash
-# Modify main.py logging level
-# Line ~18, change from logging.INFO to logging.DEBUG
-logging.basicConfig(level=logging.DEBUG, ...)
-
-# Run again
-python main.py
-```
-
----
-
-## Environment Variables
-
-### Create `.env` file in project root:
-
-```
-# Model Configuration
-MODEL_CACHE_DIR=./models
-GPU_ENABLED=true
-
-# Database
-DB_PATH=./nexuzy.db
-
-# Logging
-LOG_LEVEL=INFO
-LOG_FILE=nexuzy_publisher.log
-
-# Appearance
-THEME=dark
-WINDOW_WIDTH=1200
-WINDOW_HEIGHT=700
-```
-
----
-
-## Security Setup
-
-### Database Encryption (Optional)
-```python
-# Install SQLCipher
-pip install sqlcipher3-binary
-
-# Modify main.py database initialization to use encryption
-```
-
-### WordPress Credentials Security
-- Never commit `.env` with credentials
-- Use WordPress application passwords (not main password)
-- Application passwords are safer and revocable
-
----
-
-## Uninstallation
-
-### Windows
-1. Delete EXE file
-2. Optional: Delete `models/` folder to free 30GB
-3. Optional: Delete `nexuzy.db` to clear database
-
-### Source Installation
-```bash
-# Remove virtual environment
-rmdir /s venv  # Windows
-rm -rf venv    # Linux/Mac
-
-# Remove project folder
-rmdir /s nexuzy-publisher-desk
-rm -rf nexuzy-publisher-desk
-```
-
----
-
-## Next Steps
-
-1. **Read**: [README.md](README.md) for complete feature guide
-2. **Try**: Add RSS feeds and fetch news
-3. **Explore**: Test news matching and grouping
-4. **Configure**: Set up WordPress connection
-5. **Generate**: Create first AI draft
-6. **Publish**: Push to WordPress
-
----
-
-## Support
-
-- **Issues**: https://github.com/david0154/nexuzy-publisher-desk/issues
-- **Discussions**: https://github.com/david0154/nexuzy-publisher-desk/discussions
-- **Logs**: Check `nexuzy_publisher.log` for detailed errors
-
----
-
-**Ready to launch? Start with `python main.py` or run the EXE!**
+**Author:** David & Nexuzy Tech
