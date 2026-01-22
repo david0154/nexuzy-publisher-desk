@@ -1,15 +1,18 @@
 # Nexuzy Publisher Desk - Python Dependencies
-# Updated with GGUF model support using ctransformers (Pure Python)
+# Fixed version constraints for compatibility
 
-# Core dependencies
-transformers>=4.36.0
-sentence-transformers>=2.2.2
+# NumPy - Must be <2.0 for compatibility with torch
+numpy>=1.24.0,<2.0.0
+
+# Core dependencies with version constraints
+transformers>=4.36.0,<4.45.0
+sentence-transformers>=2.2.2,<3.0.0
 
 # GGUF model support (CPU-optimized, Pure Python)
 ctransformers>=0.2.27
 
-# For translation
-torch>=2.1.0
+# PyTorch - Compatible with NumPy 1.x
+torch>=2.1.0,<2.5.0
 
 # HuggingFace model downloads
 huggingface_hub>=0.19.4
