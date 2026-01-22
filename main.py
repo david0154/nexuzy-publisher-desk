@@ -1,7 +1,6 @@
 """ 
 Nexuzy Publisher Desk - Main Entry Point
-Complete offline AI-powered news publishing application
-Built with Python, Tkinter, and offline AI models (Pure Python - No C++)
+Complete AI-powered news publishing application with Modern UI
 """
 
 import os
@@ -10,16 +9,20 @@ import json
 import sqlite3
 import threading
 import tkinter as tk
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext, ttk
 from pathlib import Path
 import logging
+from datetime import datetime
 
 # Fix Windows encoding issues
 if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except:
+        pass
 
-# Configure logging with UTF-8 encoding
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -30,119 +33,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============================================================================
-# AUTO-DOWNLOADER FOR AI MODELS (First Run) - PURE PYTHON (NO C++)
-# ============================================================================
+# Modern Color Scheme
+COLORS = {
+    'primary': '#3498db',      # Blue
+    'success': '#2ecc71',      # Green
+    'warning': '#f39c12',      # Orange
+    'danger': '#e74c3c',       # Red
+    'dark': '#2c3e50',         # Dark Blue
+    'darker': '#1a252f',       # Darker
+    'light': '#ecf0f1',        # Light Gray
+    'white': '#ffffff',
+    'text': '#2c3e50',
+    'text_light': '#7f8c8d',
+    'border': '#bdc3c7',
+    'hover': '#5dade2',
+    'active': '#2980b9'
+}
 
-class ModelDownloader:
-    """Auto-download AI models on first run - Using pure Python transformers"""
-    
-    MODEL_CONFIG = {
-        'sentence-transformers/all-MiniLM-L6-v2': {
-            'name': 'SentenceTransformer',
-            'size': '80MB',
-            'use': 'News matching & similarity',
-            'type': 'standard'
-        },
-        'mistralai/Mistral-7B-Instruct-v0.1': {
-            'name': 'Mistral-7B',
-            'size': '14GB',
-            'use': 'Draft generation (Pure Python)',
-            'type': 'standard'
-        },
-        'facebook/nllb-200-distilled-600M': {
-            'name': 'NLLB-200',
-            'size': '1.2GB',
-            'use': 'Multi-language translation',
-            'type': 'standard'
-        }
+# =============================================================================
+# ENHANCED MODEL CONFIGURATION
+# =============================================================================
+
+MODEL_CONFIGS = {
+    'sentence_transformer': {
+        'name': 'all-MiniLM-L6-v2',
+        'full_name': 'sentence-transformers/all-MiniLM-L6-v2',
+        'size': '80MB',
+        'purpose': 'News Similarity Matching',
+        'type': 'embedding',
+        'color': COLORS['success']
+    },
+    'draft_generator': {
+        'name': 'Mistral-7B-Instruct-Q4',
+        'full_name': 'TheBloke/Mistral-7B-Instruct-v0.2-GGUF',
+        'size': '4.1GB',
+        'purpose': 'AI Draft Generation',
+        'type': 'llm_gguf',
+        'color': COLORS['primary']
+    },
+    'translator': {
+        'name': 'NLLB-200-Distilled',
+        'full_name': 'facebook/nllb-200-distilled-600M',
+        'size': '1.2GB',
+        'purpose': 'Multi-Language Translation',
+        'type': 'seq2seq',
+        'color': COLORS['warning']
     }
-    
-    def __init__(self):
-        self.models_dir = Path('models')
-        self.models_dir.mkdir(exist_ok=True)
-        self.config_file = self.models_dir / 'models_config.json'
-    
-    def load_config(self):
-        """Load downloaded models config"""
-        if self.config_file.exists():
-            with open(self.config_file, 'r') as f:
-                return json.load(f)
-        return {}
-    
-    def save_config(self, config):
-        """Save models config"""
-        with open(self.config_file, 'w') as f:
-            json.dump(config, f, indent=2)
-    
-    def check_and_download(self):
-        """Check if models exist, download if needed"""
-        config = self.load_config()
-        
-        for model_id, model_info in self.MODEL_CONFIG.items():
-            model_name = model_info['name']
-            
-            if model_name not in config:
-                logger.info(f"Downloading {model_name} ({model_info['size']})...")
-                try:
-                    self._download_model(model_id, model_name, model_info)
-                    config[model_name] = {
-                        'model_id': model_id,
-                        'downloaded': True,
-                        'size': model_info['size'],
-                        'type': model_info.get('type', 'standard')
-                    }
-                    self.save_config(config)
-                    logger.info(f"[OK] {model_name} downloaded successfully")
-                except Exception as e:
-                    logger.error(f"[FAIL] Failed to download {model_name}: {e}")
-                    return False
-        
-        return True
-    
-    def _download_model(self, model_id, model_name, model_info):
-        """Download model from HuggingFace using pure Python"""
-        try:
-            if 'SentenceTransformer' in model_name:
-                from sentence_transformers import SentenceTransformer
-                
-                logger.info(f"Loading SentenceTransformer: {model_id}")
-                model = SentenceTransformer(model_id, cache_folder=str(self.models_dir))
-                model.save(str(self.models_dir / model_id.replace('/', '_')))
-            
-            else:
-                from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
-                
-                logger.info(f"Loading transformers model: {model_id}")
-                
-                # Load tokenizer
-                tokenizer = AutoTokenizer.from_pretrained(
-                    model_id,
-                    cache_dir=str(self.models_dir),
-                    trust_remote_code=True
-                )
-                
-                # Load model
-                if 'nllb' in model_id.lower():
-                    model = AutoModelForSeq2SeqLM.from_pretrained(
-                        model_id,
-                        cache_dir=str(self.models_dir),
-                        trust_remote_code=True,
-                        low_cpu_mem_usage=True
-                    )
-                else:
-                    model = AutoModelForCausalLM.from_pretrained(
-                        model_id,
-                        cache_dir=str(self.models_dir),
-                        trust_remote_code=True,
-                        low_cpu_mem_usage=True
-                    )
-                
-                logger.info(f"Model {model_id} cached successfully")
-        
-        except ImportError as e:
-            logger.error(f"Required library not installed: {e}")
-            raise
+}
 
 # ============================================================================
 # DATABASE SETUP
@@ -203,7 +140,7 @@ class DatabaseSetup:
             )
         ''')
         
-        # News Grouping (same event detection)
+        # News Grouping
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS news_groups (
                 id INTEGER PRIMARY KEY,
@@ -302,7 +239,7 @@ class DatabaseSetup:
             )
         ''')
         
-        # WordPress Credentials (encrypted)
+        # WordPress Credentials
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS wp_credentials (
                 id INTEGER PRIMARY KEY,
@@ -318,23 +255,51 @@ class DatabaseSetup:
         
         conn.commit()
         conn.close()
-        logger.info("[OK] Database initialized successfully")
+        logger.info("[OK] Database initialized")
 
 # ============================================================================
-# TKINTER UI - MAIN WINDOW WITH FULL WIRING
+# MODERN TKINTER UI
 # ============================================================================
+
+class ModernButton(tk.Button):
+    """Styled modern button"""
+    def __init__(self, parent, text, command=None, color='primary', **kwargs):
+        bg_color = COLORS.get(color, COLORS['primary'])
+        super().__init__(
+            parent,
+            text=text,
+            command=command,
+            bg=bg_color,
+            fg=COLORS['white'],
+            font=('Segoe UI', 10, 'bold'),
+            relief=tk.FLAT,
+            cursor='hand2',
+            padx=20,
+            pady=10,
+            **kwargs
+        )
+        
+        self.default_bg = bg_color
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+    
+    def _on_enter(self, e):
+        self['bg'] = COLORS['hover']
+    
+    def _on_leave(self, e):
+        self['bg'] = self.default_bg
 
 class NexuzyPublisherApp(tk.Tk):
-    """Main application window - FULLY WIRED - PURE PYTHON (NO C++)"""
+    """Main application with modern colorful UI"""
     
     def __init__(self):
         super().__init__()
         
-        self.title("Nexuzy Publisher Desk")
-        self.geometry("1200x700")
-        self.configure(bg='#f0f0f0')
+        self.title("Nexuzy Publisher Desk - AI News Platform")
+        self.geometry("1400x800")
+        self.configure(bg=COLORS['white'])
         
-        # Try to set icon if exists
+        # Window icon
         try:
             if os.path.exists('resources/logo.ico'):
                 self.iconbitmap('resources/logo.ico')
@@ -344,8 +309,6 @@ class NexuzyPublisherApp(tk.Tk):
         self.db_path = 'nexuzy.db'
         self.current_workspace = None
         self.current_workspace_id = None
-        self.current_draft = None
-        self.selected_news_id = None
         
         # Initialize database
         DatabaseSetup(self.db_path)
@@ -354,8 +317,11 @@ class NexuzyPublisherApp(tk.Tk):
         self._import_modules()
         
         # Create UI
-        self.create_widgets()
+        self.create_modern_ui()
         self.load_workspaces()
+        
+        # Show welcome screen
+        self.show_dashboard()
     
     def _import_modules(self):
         """Import core modules"""
@@ -374,67 +340,180 @@ class NexuzyPublisherApp(tk.Tk):
             self.translator = Translator(self.db_path)
             self.wordpress = WordPressAPI(self.db_path)
             
-            logger.info("[OK] Core modules loaded (Pure Python)")
-        except ImportError as e:
-            logger.error(f"Failed to import modules: {e}")
-            messagebox.showerror("Error", f"Failed to load core modules: {e}")
+            logger.info("[OK] Core modules loaded")
+        except Exception as e:
+            logger.error(f"Module import error: {e}")
+            self.rss_manager = None
+            self.news_matcher = None
+            self.scraper = None
+            self.draft_generator = None
+            self.translator = None
+            self.wordpress = None
     
-    def create_widgets(self):
-        """Create main UI layout"""
-        # Header
-        header = tk.Frame(self, bg='#2c3e50', height=60)
+    def create_modern_ui(self):
+        """Create modern colorful UI"""
+        # TOP HEADER
+        header = tk.Frame(self, bg=COLORS['dark'], height=70)
         header.pack(side=tk.TOP, fill=tk.X)
+        header.pack_propagate(False)
         
-        header_label = tk.Label(
-            header,
-            text="Nexuzy Publisher Desk (Pure Python)",
-            font=('Arial', 16, 'bold'),
-            bg='#2c3e50',
-            fg='white'
+        # Logo and title
+        title_frame = tk.Frame(header, bg=COLORS['dark'])
+        title_frame.pack(side=tk.LEFT, padx=20, pady=15)
+        
+        tk.Label(
+            title_frame,
+            text="NEXUZY",
+            font=('Segoe UI', 24, 'bold'),
+            bg=COLORS['dark'],
+            fg=COLORS['primary']
+        ).pack(side=tk.LEFT)
+        
+        tk.Label(
+            title_frame,
+            text="Publisher Desk",
+            font=('Segoe UI', 16),
+            bg=COLORS['dark'],
+            fg=COLORS['white']
+        ).pack(side=tk.LEFT, padx=10)
+        
+        # Workspace selector
+        workspace_frame = tk.Frame(header, bg=COLORS['dark'])
+        workspace_frame.pack(side=tk.RIGHT, padx=20)
+        
+        tk.Label(
+            workspace_frame,
+            text="Workspace:",
+            font=('Segoe UI', 10),
+            bg=COLORS['dark'],
+            fg=COLORS['light']
+        ).pack(side=tk.LEFT, padx=5)
+        
+        self.workspace_var = tk.StringVar(value="Select Workspace")
+        self.workspace_menu = ttk.Combobox(
+            workspace_frame,
+            textvariable=self.workspace_var,
+            state='readonly',
+            width=25,
+            font=('Segoe UI', 10)
         )
-        header_label.pack(pady=10)
+        self.workspace_menu.pack(side=tk.LEFT, padx=5)
+        self.workspace_menu.bind('<<ComboboxSelected>>', self.on_workspace_change)
         
-        # Main container
-        main_container = tk.Frame(self, bg='#f0f0f0')
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        ModernButton(
+            workspace_frame,
+            text="+ New",
+            command=self.new_workspace,
+            color='success'
+        ).pack(side=tk.LEFT, padx=5)
         
-        # Left panel - Navigation
-        left_panel = tk.Frame(main_container, bg='#ecf0f1', width=250)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
+        # MAIN CONTAINER
+        main_container = tk.Frame(self, bg=COLORS['light'])
+        main_container.pack(fill=tk.BOTH, expand=True)
         
-        tk.Label(left_panel, text="Workspace", font=('Arial', 10, 'bold'), bg='#ecf0f1').pack(pady=10)
+        # LEFT SIDEBAR
+        sidebar = tk.Frame(main_container, bg=COLORS['darker'], width=250)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar.pack_propagate(False)
         
-        self.workspace_var = tk.StringVar()
-        self.workspace_dropdown = tk.OptionMenu(left_panel, self.workspace_var, '')
-        self.workspace_dropdown.pack(fill=tk.X, padx=5, pady=5)
+        # Navigation buttons
+        nav_buttons = [
+            ("Dashboard", self.show_dashboard, 'primary'),
+            ("RSS Feeds", self.show_rss_manager, 'primary'),
+            ("News Queue", self.show_news_queue, 'primary'),
+            ("AI Editor", self.show_editor, 'success'),
+            ("Translations", self.show_translations, 'warning'),
+            ("WordPress", self.show_wordpress_config, 'primary'),
+            ("Settings", self.show_settings, 'text_light'),
+        ]
         
-        # Buttons
-        button_frame = tk.Frame(left_panel, bg='#ecf0f1')
-        button_frame.pack(fill=tk.X, padx=5, pady=20)
+        tk.Label(
+            sidebar,
+            text="NAVIGATION",
+            font=('Segoe UI', 10, 'bold'),
+            bg=COLORS['darker'],
+            fg=COLORS['text_light'],
+            pady=20
+        ).pack(fill=tk.X, padx=15)
         
-        tk.Button(button_frame, text="+ New Workspace", command=self.new_workspace).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="RSS Manager", command=self.show_rss_manager).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="News Queue", command=self.show_news_queue).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="Editor", command=self.show_editor).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="WordPress", command=self.show_wordpress_config).pack(fill=tk.X, pady=3)
-        tk.Button(button_frame, text="Settings", command=self.show_settings).pack(fill=tk.X, pady=3)
+        for btn_text, btn_cmd, btn_color in nav_buttons:
+            self.create_nav_button(sidebar, btn_text, btn_cmd, btn_color)
         
-        # Right panel - Content area
-        self.content_frame = tk.Frame(main_container, bg='white')
-        self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Content area
+        self.content_frame = tk.Frame(main_container, bg=COLORS['white'])
+        self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=2, pady=2)
         
-        # Status bar
-        status_bar = tk.Frame(self, bg='#34495e', height=30)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        # BOTTOM STATUS BAR
+        statusbar = tk.Frame(self, bg=COLORS['dark'], height=35)
+        statusbar.pack(side=tk.BOTTOM, fill=tk.X)
+        statusbar.pack_propagate(False)
         
         self.status_label = tk.Label(
-            status_bar,
-            text="Ready | Pure Python (No C++ Required)",
-            font=('Arial', 9),
-            bg='#34495e',
-            fg='#ecf0f1'
+            statusbar,
+            text="Ready | AI-Powered News Platform",
+            font=('Segoe UI', 9),
+            bg=COLORS['dark'],
+            fg=COLORS['light'],
+            anchor=tk.W
         )
-        self.status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        self.status_label.pack(side=tk.LEFT, padx=15, fill=tk.X, expand=True)
+        
+        # Time label
+        self.time_label = tk.Label(
+            statusbar,
+            text=datetime.now().strftime("%H:%M:%S"),
+            font=('Segoe UI', 9),
+            bg=COLORS['dark'],
+            fg=COLORS['light']
+        )
+        self.time_label.pack(side=tk.RIGHT, padx=15)
+        self.update_time()
+    
+    def create_nav_button(self, parent, text, command, color):
+        """Create navigation button"""
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=COLORS['darker'],
+            fg=COLORS['white'],
+            font=('Segoe UI', 11),
+            relief=tk.FLAT,
+            cursor='hand2',
+            anchor=tk.W,
+            padx=20,
+            pady=12
+        )
+        btn.pack(fill=tk.X, padx=5, pady=2)
+        
+        def on_enter(e):
+            btn['bg'] = COLORS['dark']
+        
+        def on_leave(e):
+            btn['bg'] = COLORS['darker']
+        
+        btn.bind('<Enter>', on_enter)
+        btn.bind('<Leave>', on_leave)
+        
+        return btn
+    
+    def update_time(self):
+        """Update time label"""
+        self.time_label.config(text=datetime.now().strftime("%H:%M:%S"))
+        self.after(1000, self.update_time)
+    
+    def clear_content(self):
+        """Clear content frame"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+    
+    def update_status(self, message, color='light'):
+        """Update status bar"""
+        self.status_label.config(text=message, fg=COLORS.get(color, COLORS['light']))
+    
+    # ===========================================
+    # WORKSPACE MANAGEMENT
+    # ===========================================
     
     def load_workspaces(self):
         """Load workspaces from database"""
@@ -446,35 +525,62 @@ class NexuzyPublisherApp(tk.Tk):
             conn.close()
             
             if workspaces:
-                self.workspace_dropdown['menu'].delete(0, 'end')
-                for ws_id, ws_name in workspaces:
-                    self.workspace_dropdown['menu'].add_command(
-                        label=ws_name,
-                        command=lambda x=ws_name, y=ws_id: self.select_workspace(x, y)
-                    )
-                self.select_workspace(workspaces[0][1], workspaces[0][0])
+                names = [ws[1] for ws in workspaces]
+                self.workspace_menu['values'] = names
+                self.workspace_menu.current(0)
+                self.current_workspace = workspaces[0][1]
+                self.current_workspace_id = workspaces[0][0]
             else:
+                self.workspace_menu['values'] = []
                 self.new_workspace()
-        
         except Exception as e:
             logger.error(f"Error loading workspaces: {e}")
     
-    def select_workspace(self, workspace_name, workspace_id):
-        """Select active workspace"""
-        self.workspace_var.set(workspace_name)
-        self.current_workspace = workspace_name
-        self.current_workspace_id = workspace_id
-        self.update_status(f"Workspace: {workspace_name}")
+    def on_workspace_change(self, event=None):
+        """Handle workspace selection"""
+        selected = self.workspace_var.get()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM workspaces WHERE name = ?', (selected,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                self.current_workspace = selected
+                self.current_workspace_id = result[0]
+                self.update_status(f"Switched to: {selected}", 'success')
+        except Exception as e:
+            logger.error(f"Error switching workspace: {e}")
     
     def new_workspace(self):
-        """Create new workspace"""
+        """Create new workspace dialog"""
         dialog = tk.Toplevel(self)
         dialog.title("New Workspace")
-        dialog.geometry("300x100")
+        dialog.geometry("400x150")
+        dialog.configure(bg=COLORS['white'])
+        dialog.transient(self)
+        dialog.grab_set()
         
-        tk.Label(dialog, text="Workspace Name:").pack(pady=10)
-        name_entry = tk.Entry(dialog, width=30)
+        tk.Label(
+            dialog,
+            text="Create New Workspace",
+            font=('Segoe UI', 14, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(pady=15)
+        
+        tk.Label(
+            dialog,
+            text="Workspace Name:",
+            font=('Segoe UI', 10),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(pady=5)
+        
+        name_entry = tk.Entry(dialog, width=30, font=('Segoe UI', 11))
         name_entry.pack(pady=5)
+        name_entry.focus()
         
         def create():
             name = name_entry.get().strip()
@@ -491,67 +597,374 @@ class NexuzyPublisherApp(tk.Tk):
                 
                 self.load_workspaces()
                 dialog.destroy()
-                messagebox.showinfo("Success", f"Workspace '{name}' created")
+                messagebox.showinfo("Success", f"Workspace '{name}' created successfully!")
             except sqlite3.IntegrityError:
-                messagebox.showerror("Error", "Workspace already exists")
+                messagebox.showerror("Error", "Workspace name already exists")
             except Exception as e:
                 messagebox.showerror("Error", f"Error: {e}")
         
-        tk.Button(dialog, text="Create", command=create).pack(pady=10)
+        ModernButton(dialog, text="Create Workspace", command=create, color='success').pack(pady=15)
     
-    # Placeholder methods for other UI sections
+    # ===========================================
+    # SCREEN VIEWS
+    # ===========================================
+    
+    def show_dashboard(self):
+        """Show dashboard with stats and quick actions"""
+        self.clear_content()
+        self.update_status("Dashboard", 'primary')
+        
+        # Header
+        header = tk.Frame(self.content_frame, bg=COLORS['white'])
+        header.pack(fill=tk.X, padx=30, pady=20)
+        
+        tk.Label(
+            header,
+            text="Dashboard",
+            font=('Segoe UI', 24, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(side=tk.LEFT)
+        
+        # Stats cards
+        stats_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
+        stats_frame.pack(fill=tk.X, padx=30, pady=10)
+        
+        # Get stats
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM news_queue WHERE workspace_id = ?', (self.current_workspace_id,))
+            news_count = cursor.fetchone()[0] if self.current_workspace_id else 0
+            
+            cursor.execute('SELECT COUNT(*) FROM ai_drafts WHERE workspace_id = ?', (self.current_workspace_id,))
+            drafts_count = cursor.fetchone()[0] if self.current_workspace_id else 0
+            
+            cursor.execute('SELECT COUNT(*) FROM rss_feeds WHERE workspace_id = ?', (self.current_workspace_id,))
+            feeds_count = cursor.fetchone()[0] if self.current_workspace_id else 0
+            
+            conn.close()
+        except:
+            news_count = drafts_count = feeds_count = 0
+        
+        self.create_stat_card(stats_frame, "News Queue", str(news_count), COLORS['primary'])
+        self.create_stat_card(stats_frame, "AI Drafts", str(drafts_count), COLORS['success'])
+        self.create_stat_card(stats_frame, "RSS Feeds", str(feeds_count), COLORS['warning'])
+        
+        # Quick actions
+        actions_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
+        actions_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
+        
+        tk.Label(
+            actions_frame,
+            text="Quick Actions",
+            font=('Segoe UI', 16, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(anchor=tk.W, pady=10)
+        
+        btn_frame = tk.Frame(actions_frame, bg=COLORS['white'])
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        ModernButton(btn_frame, "Add RSS Feed", self.show_rss_manager, 'primary').pack(side=tk.LEFT, padx=5)
+        ModernButton(btn_frame, "Generate Draft", self.show_editor, 'success').pack(side=tk.LEFT, padx=5)
+        ModernButton(btn_frame, "View News", self.show_news_queue, 'warning').pack(side=tk.LEFT, padx=5)
+    
+    def create_stat_card(self, parent, title, value, color):
+        """Create colored stat card"""
+        card = tk.Frame(parent, bg=color, relief=tk.RAISED, borderwidth=0)
+        card.pack(side=tk.LEFT, padx=10, pady=10, ipadx=30, ipady=20)
+        
+        tk.Label(
+            card,
+            text=value,
+            font=('Segoe UI', 32, 'bold'),
+            bg=color,
+            fg=COLORS['white']
+        ).pack()
+        
+        tk.Label(
+            card,
+            text=title,
+            font=('Segoe UI', 12),
+            bg=color,
+            fg=COLORS['white']
+        ).pack()
+    
     def show_rss_manager(self):
-        self.update_status("RSS Manager - Feature implemented in full version")
+        """Show RSS feed management interface"""
+        self.clear_content()
+        self.update_status("RSS Feed Manager", 'primary')
+        
+        tk.Label(
+            self.content_frame,
+            text="RSS Feed Manager",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
+        
+        # Add feed form
+        form_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
+        form_frame.pack(fill=tk.X, padx=30, pady=10, ipady=15)
+        
+        tk.Label(form_frame, text="RSS Feed URL:", bg=COLORS['light']).pack(side=tk.LEFT, padx=10)
+        url_entry = tk.Entry(form_frame, width=50, font=('Segoe UI', 10))
+        url_entry.pack(side=tk.LEFT, padx=5)
+        
+        ModernButton(form_frame, "Add Feed", lambda: self.add_rss_feed(url_entry.get()), 'success').pack(side=tk.LEFT, padx=10)
+        
+        # Feed list
+        list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
+        
+        tk.Label(
+            list_frame,
+            text="Active Feeds",
+            font=('Segoe UI', 14, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(anchor=tk.W, pady=10)
+        
+        # Scrollable list
+        self.feeds_listbox = tk.Listbox(list_frame, font=('Segoe UI', 10), height=15)
+        self.feeds_listbox.pack(fill=tk.BOTH, expand=True)
+        
+        self.load_rss_feeds()
+    
+    def add_rss_feed(self, url):
+        """Add RSS feed to database"""
+        if not url or not self.current_workspace_id:
+            messagebox.showerror("Error", "Please enter a valid RSS feed URL and select a workspace")
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO rss_feeds (workspace_id, url) VALUES (?, ?)',
+                (self.current_workspace_id, url)
+            )
+            conn.commit()
+            conn.close()
+            
+            self.load_rss_feeds()
+            self.update_status(f"Feed added: {url}", 'success')
+            messagebox.showinfo("Success", "RSS feed added successfully!")
+        except sqlite3.IntegrityError:
+            messagebox.showerror("Error", "This feed is already added")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error adding feed: {e}")
+    
+    def load_rss_feeds(self):
+        """Load RSS feeds into listbox"""
+        if not hasattr(self, 'feeds_listbox'):
+            return
+        
+        self.feeds_listbox.delete(0, tk.END)
+        
+        if not self.current_workspace_id:
+            return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT url, enabled FROM rss_feeds WHERE workspace_id = ?',
+                (self.current_workspace_id,)
+            )
+            feeds = cursor.fetchall()
+            conn.close()
+            
+            for url, enabled in feeds:
+                status = "[ACTIVE]" if enabled else "[DISABLED]"
+                self.feeds_listbox.insert(tk.END, f"{status} {url}")
+        except Exception as e:
+            logger.error(f"Error loading feeds: {e}")
     
     def show_news_queue(self):
-        self.update_status("News Queue - Feature implemented in full version")
+        """Show news queue"""
+        self.clear_content()
+        self.update_status("News Queue", 'warning')
+        
+        tk.Label(
+            self.content_frame,
+            text="News Queue",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
+        
+        tk.Label(
+            self.content_frame,
+            text="Recent news items will appear here after RSS feeds are processed.",
+            font=('Segoe UI', 11),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(padx=30, pady=10, anchor=tk.W)
+        
+        ModernButton(self.content_frame, "Fetch from RSS", self.fetch_rss_news, 'primary').pack(padx=30, pady=20, anchor=tk.W)
+    
+    def fetch_rss_news(self):
+        """Fetch news from RSS feeds"""
+        if not self.rss_manager or not self.current_workspace_id:
+            messagebox.showwarning("Warning", "Please select a workspace first")
+            return
+        
+        self.update_status("Fetching news from RSS feeds...", 'warning')
+        # This would trigger actual RSS fetching
+        messagebox.showinfo("Info", "RSS fetching will be implemented in the full version")
     
     def show_editor(self):
-        self.update_status("Editor - Feature implemented in full version")
+        """Show AI editor interface"""
+        self.clear_content()
+        self.update_status("AI Draft Editor", 'success')
+        
+        tk.Label(
+            self.content_frame,
+            text="AI Draft Editor",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
+        
+        tk.Label(
+            self.content_frame,
+            text="Generate AI-powered article drafts from news items.",
+            font=('Segoe UI', 11),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(padx=30, pady=10, anchor=tk.W)
+        
+        ModernButton(self.content_frame, "Generate Draft", self.generate_test_draft, 'success').pack(padx=30, pady=20, anchor=tk.W)
+    
+    def generate_test_draft(self):
+        """Generate test draft"""
+        if not self.draft_generator:
+            messagebox.showwarning("Warning", "Draft generator not loaded")
+            return
+        
+        self.update_status("Generating draft...", 'success')
+        messagebox.showinfo("Info", "Draft generation will work once news items are added")
+    
+    def show_translations(self):
+        """Show translation interface"""
+        self.clear_content()
+        self.update_status("Multi-Language Translation", 'warning')
+        
+        tk.Label(
+            self.content_frame,
+            text="Translation Manager",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
+        
+        tk.Label(
+            self.content_frame,
+            text="Translate articles to multiple languages using AI.",
+            font=('Segoe UI', 11),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(padx=30, pady=10, anchor=tk.W)
     
     def show_wordpress_config(self):
-        self.update_status("WordPress Config - Feature implemented in full version")
+        """Show WordPress configuration"""
+        self.clear_content()
+        self.update_status("WordPress Integration", 'primary')
+        
+        tk.Label(
+            self.content_frame,
+            text="WordPress Integration",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
+        
+        tk.Label(
+            self.content_frame,
+            text="Connect your WordPress site to publish articles automatically.",
+            font=('Segoe UI', 11),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(padx=30, pady=10, anchor=tk.W)
     
     def show_settings(self):
+        """Show settings with AI model status"""
         self.clear_content()
+        self.update_status("Settings & AI Models", 'text_light')
         
-        title = tk.Label(self.content_frame, text="Settings", font=('Arial', 14, 'bold'))
-        title.pack(pady=10)
+        tk.Label(
+            self.content_frame,
+            text="Settings & AI Models",
+            font=('Segoe UI', 20, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(padx=30, pady=20, anchor=tk.W)
         
-        settings_frame = tk.Frame(self.content_frame, bg='white')
-        settings_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Model status section
+        models_frame = tk.Frame(self.content_frame, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
+        models_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
         
-        # Model status
-        tk.Label(settings_frame, text="AI Models Status (Pure Python):", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=10)
+        tk.Label(
+            models_frame,
+            text="AI Models Configuration",
+            font=('Segoe UI', 16, 'bold'),
+            bg=COLORS['light'],
+            fg=COLORS['text']
+        ).pack(padx=20, pady=15, anchor=tk.W)
         
-        models = [
-            ("SentenceTransformer (80MB)", "News Matching"),
-            ("Mistral-7B-Instruct (14GB)", "Draft Generation - Pure Python"),
-            ("NLLB-200-Distilled (1.2GB)", "Translation")
-        ]
-        
-        for model_name, purpose in models:
-            status_frame = tk.Frame(settings_frame, bg='white')
-            status_frame.pack(fill=tk.X, pady=5)
-            tk.Label(status_frame, text=f"[OK] {model_name}", font=('Arial', 9)).pack(anchor=tk.W)
-            tk.Label(status_frame, text=f"   Purpose: {purpose}", font=('Arial', 8), fg='gray').pack(anchor=tk.W)
-        
-        # Total size
-        tk.Label(settings_frame, text="\nTotal Model Size: ~15GB (Pure Python - No C++ compilation)", font=('Arial', 9, 'bold'), fg='#27ae60').pack(anchor=tk.W, pady=10)
-        
-        tk.Label(settings_frame, text="\n[OK] NO C++ Compiler Required", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
-        tk.Label(settings_frame, text="[OK] Works on Python 3.9, 3.10, 3.11, 3.12, 3.13", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
-        tk.Label(settings_frame, text="[OK] All dependencies install from pip", font=('Arial', 10, 'bold'), fg='#2ecc71').pack(anchor=tk.W, pady=5)
+        for model_key, config in MODEL_CONFIGS.items():
+            self.create_model_status_card(models_frame, config)
     
-    def clear_content(self):
-        """Clear content frame"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-    
-    def update_status(self, message):
-        """Update status bar"""
-        self.status_label.config(text=message)
-        self.update_idletasks()
+    def create_model_status_card(self, parent, config):
+        """Create model status card"""
+        card = tk.Frame(parent, bg=COLORS['white'], relief=tk.RAISED, borderwidth=1)
+        card.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Header with colored bar
+        header = tk.Frame(card, bg=config['color'], height=5)
+        header.pack(fill=tk.X)
+        
+        content = tk.Frame(card, bg=COLORS['white'])
+        content.pack(fill=tk.X, padx=15, pady=15)
+        
+        # Model name
+        tk.Label(
+            content,
+            text=config['name'],
+            font=('Segoe UI', 14, 'bold'),
+            bg=COLORS['white'],
+            fg=COLORS['text']
+        ).pack(anchor=tk.W)
+        
+        # Purpose
+        tk.Label(
+            content,
+            text=f"Purpose: {config['purpose']}",
+            font=('Segoe UI', 10),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(anchor=tk.W, pady=2)
+        
+        # Size
+        tk.Label(
+            content,
+            text=f"Size: {config['size']}",
+            font=('Segoe UI', 10),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(anchor=tk.W, pady=2)
+        
+        # Full name
+        tk.Label(
+            content,
+            text=f"Model: {config['full_name']}",
+            font=('Segoe UI', 9),
+            bg=COLORS['white'],
+            fg=COLORS['text_light']
+        ).pack(anchor=tk.W, pady=5)
 
 # ============================================================================
 # MAIN ENTRY POINT
@@ -559,26 +972,10 @@ class NexuzyPublisherApp(tk.Tk):
 
 def main():
     """Application entry point"""
+    logger.info("="* 60)
+    logger.info("Starting Nexuzy Publisher Desk")
     logger.info("=" * 60)
-    logger.info("Starting Nexuzy Publisher Desk (Pure Python)...")
-    logger.info("=" * 60)
     
-    # Check and download models on first run
-    logger.info("Checking AI models (Pure Python)...")
-    downloader = ModelDownloader()
-    
-    def download_models_async():
-        """Download models in background thread"""
-        if downloader.check_and_download():
-            logger.info("[OK] All AI models ready (Pure Python)")
-        else:
-            logger.warning("[WARN] Some models failed to download, app will run in limited mode")
-    
-    # Download in thread to not block UI
-    download_thread = threading.Thread(target=download_models_async, daemon=True)
-    download_thread.start()
-    
-    # Create and run app
     app = NexuzyPublisherApp()
     app.mainloop()
 
