@@ -1,9 +1,17 @@
 # Nexuzy Publisher Desk - Python Dependencies
+# Updated with quantized model support for 80% size reduction
 
 # Core dependencies
 transformers==4.36.0
 torch==2.1.1
 sentence-transformers==2.2.2
+
+# GPTQ quantization for smaller models
+auto-gptq==0.7.1
+optimum==1.16.1
+accelerate==0.25.0
+
+# RSS & Web
 feedparser==6.0.10
 requests==2.31.0
 beautifulsoup4==4.12.2
@@ -12,8 +20,7 @@ lxml==4.9.3
 # UI
 pillow==10.1.0
 
-# Database
-# sqlite3 is built-in
+# Database (sqlite3 is built-in)
 
 # Build
 pyinstaller==6.1.0
