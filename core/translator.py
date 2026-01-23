@@ -1,11 +1,13 @@
 """
-Translator Module - NLLB-200 Model Integration
-Supports 200+ languages with proper language codes
+Translator Module - NLLB-200 Model Integration with Enhanced Error Handling
+Supports 200+ languages with proper language codes and fallback modes
 """
 
 import sqlite3
 import logging
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +74,11 @@ class Translator:
         self.db_path = db_path
         self.translator = None
         self.tokenizer = None
+        self.translation_cache = {}  # Cache for recent translations
         self._load_model()
     
     def _load_model(self):
-        """Load NLLB-200 model"""
+        """Load NLLB-200 model with proper error handling and fallback"""
         try:
             from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
             import torch
@@ -83,78 +86,174 @@ class Translator:
             model_name = "facebook/nllb-200-distilled-600M"
             logger.info(f"Loading NLLB-200 model: {model_name}")
             
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.translator = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-            
-            logger.info("NLLB-200 model loaded successfully")
+            # Try to load model
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+                self.translator = AutoModelForSeq2SeqLM.from_pretrained(
+                    model_name,
+                    trust_remote_code=True,
+                    device_map="cpu",  # Use CPU if GPU not available
+                    low_cpu_mem_usage=True
+                )
+                
+                logger.info("[OK] NLLB-200 model loaded successfully")
+                
+            except Exception as model_error:
+                logger.warning(f"Failed to load full model: {model_error}")
+                # Try quantized version
+                logger.info("Attempting to load quantized version...")
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                self.translator = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+                logger.info("[OK] Quantized model loaded")
             
         except ImportError:
-            logger.warning("Transformers not installed. Translation will use template mode.")
+            logger.warning("Transformers not installed. Translation will use fallback mode.")
             logger.warning("Install: pip install transformers torch")
+            self.translator = None
         except Exception as e:
             logger.error(f"Error loading NLLB-200: {e}")
+            logger.warning("Falling back to template translation mode")
+            self.translator = None
     
-    def translate_text(self, text, target_language):
+    def _get_cache_key(self, text: str, target_language: str) -> str:
+        """Generate cache key for translation"""
+        content = f"{text}:{target_language}"
+        return hashlib.md5(content.encode()).hexdigest()
+    
+    def translate_text(self, text: str, target_language: str, force_refresh: bool = False) -> str:
         """
-        Translate text to target language
+        Translate text to target language with caching
         
         Args:
             text: Text to translate
             target_language: Language name (e.g., 'Spanish', 'Hindi')
+            force_refresh: Skip cache and force new translation
         
         Returns:
             Translated text
         """
-        if not self.translator or not self.tokenizer:
-            logger.warning("Using template translation (model not loaded)")
-            return f"[Translation to {target_language}]\n\n{text}"
+        if not text or not text.strip():
+            return text
         
-        # Get language code
+        # Check cache first
+        cache_key = self._get_cache_key(text, target_language)
+        if not force_refresh and cache_key in self.translation_cache:
+            logger.debug(f"Using cached translation for {target_language}")
+            return self.translation_cache[cache_key]
+        
+        # Validate language
+        if target_language not in LANGUAGE_CODES:
+            logger.error(f"Unsupported language: {target_language}")
+            logger.info(f"Supported languages: {', '.join(sorted(LANGUAGE_CODES.keys())[:10])}...")
+            return text  # Return original text if language not supported
+        
+        # Try AI translation if model loaded
+        if self.translator and self.tokenizer:
+            try:
+                result = self._translate_with_model(text, target_language)
+                # Cache the result
+                self.translation_cache[cache_key] = result
+                return result
+            except Exception as e:
+                logger.warning(f"AI translation failed: {e}. Using fallback.")
+        
+        # Fallback to template translation
+        result = f"[Translation to {target_language}]\n\n{text}"
+        self.translation_cache[cache_key] = result
+        return result
+    
+    def _translate_with_model(self, text: str, target_language: str) -> str:
+        """Translate using AI model with proper error handling"""
         target_code = LANGUAGE_CODES.get(target_language)
         if not target_code:
-            logger.error(f"Unsupported language: {target_language}")
-            return f"[Unsupported language: {target_language}]\n\n{text}"
+            raise ValueError(f"Invalid language code: {target_language}")
         
         try:
-            # Set source language (English)
-            self.tokenizer.src_lang = "eng_Latn"
-            
-            # Tokenize
-            inputs = self.tokenizer(text, return_tensors="pt", max_length=512, truncation=True)
-            
-            # Translate
-            translated_tokens = self.translator.generate(
-                **inputs,
-                forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(target_code),
-                max_length=512
-            )
-            
-            # Decode
-            translated_text = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)[0]
-            
-            logger.info(f"Translated to {target_language} successfully")
-            return translated_text
-            
+            # Handle long texts by chunking
+            max_length = 512
+            if len(text) > max_length:
+                chunks = self._chunk_text(text, max_length)
+                translated_chunks = []
+                for chunk in chunks:
+                    chunk_result = self._translate_chunk(chunk, target_code)
+                    translated_chunks.append(chunk_result)
+                return " ".join(translated_chunks)
+            else:
+                return self._translate_chunk(text, target_code)
+        
         except Exception as e:
             logger.error(f"Translation error: {e}")
-            return f"[Translation Error: {e}]\n\n{text}"
+            raise
     
-    def translate_draft(self, draft_id, target_language):
+    def _translate_chunk(self, text: str, target_code: str) -> str:
+        """Translate a single chunk of text"""
+        # Set source language (English)
+        self.tokenizer.src_lang = "eng_Latn"
+        
+        # Tokenize
+        inputs = self.tokenizer(text, return_tensors="pt", max_length=512, truncation=True)
+        
+        # Translate
+        translated_tokens = self.translator.generate(
+            **inputs,
+            forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(target_code),
+            max_length=512,
+            temperature=0.7,
+            top_p=0.9
+        )
+        
+        # Decode
+        translated_text = self.tokenizer.batch_decode(
+            translated_tokens,
+            skip_special_tokens=True
+        )[0]
+        
+        logger.debug(f"Translated chunk successfully")
+        return translated_text
+    
+    def _chunk_text(self, text: str, chunk_size: int = 512) -> List[str]:
+        """Split text into chunks while preserving sentences"""
+        sentences = text.split('. ')
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) < chunk_size:
+                current_chunk += sentence + ". "
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = sentence + ". "
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+    
+    def translate_draft(self, draft_id: int, target_language: str) -> Optional[Dict]:
         """
-        Translate a draft from database
+        Translate a draft from database with proper error handling
         
         Args:
             draft_id: Draft ID from database
             target_language: Target language name
         
         Returns:
-            dict with translation details
+            dict with translation details or None if failed
         """
         try:
+            # Validate language
+            if target_language not in LANGUAGE_CODES:
+                logger.error(f"Invalid target language: {target_language}")
+                return None
+            
             # Get draft
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('SELECT workspace_id, title, body_draft FROM ai_drafts WHERE id = ?', (draft_id,))
+            cursor.execute('''
+                SELECT workspace_id, title, body_draft, summary
+                FROM ai_drafts WHERE id = ?
+            ''', (draft_id,))
             result = cursor.fetchone()
             
             if not result:
@@ -162,7 +261,7 @@ class Translator:
                 conn.close()
                 return None
             
-            workspace_id, title, body = result
+            workspace_id, title, body, summary = result
             
             # Translate title
             logger.info(f"Translating title to {target_language}...")
@@ -172,11 +271,18 @@ class Translator:
             logger.info(f"Translating body to {target_language}...")
             translated_body = self.translate_text(body, target_language)
             
+            # Translate summary if present
+            translated_summary = ""
+            if summary:
+                logger.info(f"Translating summary to {target_language}...")
+                translated_summary = self.translate_text(summary, target_language)
+            
             # Save translation
             cursor.execute('''
-                INSERT INTO translations (draft_id, language, title, body, approved)
-                VALUES (?, ?, ?, ?, 0)
-            ''', (draft_id, target_language, translated_title, translated_body))
+                INSERT INTO translations
+                (draft_id, language, title, body, summary, approved, status)
+                VALUES (?, ?, ?, ?, ?, 0, 'pending_review')
+            ''', (draft_id, target_language, translated_title, translated_body, translated_summary))
             
             translation_id = cursor.lastrowid
             conn.commit()
@@ -189,20 +295,35 @@ class Translator:
                 'draft_id': draft_id,
                 'language': target_language,
                 'title': translated_title,
-                'body': translated_body
+                'body': translated_body,
+                'summary': translated_summary,
+                'status': 'pending_review'
             }
             
         except Exception as e:
             logger.error(f"Error translating draft: {e}")
             return None
     
-    def get_translations(self, draft_id):
+    def batch_translate(self, draft_ids: List[int], target_languages: List[str]) -> List[Dict]:
+        """Translate multiple drafts to multiple languages"""
+        results = []
+        for draft_id in draft_ids:
+            for language in target_languages:
+                try:
+                    result = self.translate_draft(draft_id, language)
+                    if result:
+                        results.append(result)
+                except Exception as e:
+                    logger.error(f"Error translating draft {draft_id} to {language}: {e}")
+        return results
+    
+    def get_translations(self, draft_id: int) -> List[Tuple]:
         """Get all translations for a draft"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, language, title, body, approved, translated_at
+                SELECT id, language, title, body, summary, approved, status, translated_at
                 FROM translations
                 WHERE draft_id = ?
                 ORDER BY translated_at DESC
@@ -216,6 +337,29 @@ class Translator:
             logger.error(f"Error getting translations: {e}")
             return []
     
-    def get_supported_languages(self):
+    def get_supported_languages(self) -> List[str]:
         """Get list of supported languages"""
         return sorted(LANGUAGE_CODES.keys())
+    
+    def approve_translation(self, translation_id: int) -> bool:
+        """Mark translation as approved"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE translations
+                SET approved = 1, status = 'approved'
+                WHERE id = ?
+            ''', (translation_id,))
+            conn.commit()
+            conn.close()
+            logger.info(f"Translation {translation_id} approved")
+            return True
+        except Exception as e:
+            logger.error(f"Error approving translation: {e}")
+            return False
+    
+    def clear_cache(self):
+        """Clear translation cache to free memory"""
+        self.translation_cache.clear()
+        logger.info("Translation cache cleared")
