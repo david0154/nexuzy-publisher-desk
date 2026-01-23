@@ -1,6 +1,7 @@
 """
 Translator Module - NLLB-200 Model Integration with Enhanced Error Handling
 Supports 200+ languages with proper language codes and fallback modes
+Fixed workflow: Save as new draft after translation for WordPress push
 """
 
 import sqlite3
@@ -96,7 +97,7 @@ class Translator:
                     low_cpu_mem_usage=True
                 )
                 
-                logger.info("[OK] NLLB-200 model loaded successfully")
+                logger.info("✅ NLLB-200 model loaded successfully")
                 
             except Exception as model_error:
                 logger.warning(f"Failed to load full model: {model_error}")
@@ -104,7 +105,7 @@ class Translator:
                 logger.info("Attempting to load quantized version...")
                 self.tokenizer = AutoTokenizer.from_pretrained(model_name)
                 self.translator = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-                logger.info("[OK] Quantized model loaded")
+                logger.info("✅ Quantized model loaded")
             
         except ImportError:
             logger.warning("Transformers not installed. Translation will use fallback mode.")
@@ -232,14 +233,15 @@ class Translator:
     
     def translate_draft(self, draft_id: int, target_language: str) -> Optional[Dict]:
         """
-        Translate a draft from database with proper error handling
+        Translate a draft and save as NEW draft in ai_drafts table
+        This allows WordPress push to work with translated draft
         
         Args:
-            draft_id: Draft ID from database
+            draft_id: Original draft ID from database
             target_language: Target language name
         
         Returns:
-            dict with translation details or None if failed
+            dict with new draft details or None if failed
         """
         try:
             # Validate language
@@ -247,11 +249,11 @@ class Translator:
                 logger.error(f"Invalid target language: {target_language}")
                 return None
             
-            # Get draft
+            # Get original draft
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT workspace_id, title, body_draft, summary
+                SELECT workspace_id, news_id, title, body_draft, summary, image_url, source_url, source_domain
                 FROM ai_drafts WHERE id = ?
             ''', (draft_id,))
             result = cursor.fetchone()
@@ -261,7 +263,7 @@ class Translator:
                 conn.close()
                 return None
             
-            workspace_id, title, body, summary = result
+            workspace_id, news_id, title, body, summary, image_url, source_url, source_domain = result
             
             # Translate title
             logger.info(f"Translating title to {target_language}...")
@@ -277,31 +279,53 @@ class Translator:
                 logger.info(f"Translating summary to {target_language}...")
                 translated_summary = self.translate_text(summary, target_language)
             
-            # Save translation
+            # Save as NEW draft in ai_drafts table (so WordPress push works)
+            word_count = len(translated_body.split())
+            cursor.execute('''
+                INSERT INTO ai_drafts 
+                (workspace_id, news_id, title, body_draft, summary, word_count, image_url, source_url, source_domain, is_html, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ''', (
+                workspace_id,
+                news_id,
+                f"{translated_title} [{target_language}]",  # Add language tag
+                translated_body,
+                translated_summary,
+                word_count,
+                image_url or '',
+                source_url or '',
+                source_domain or '',
+                datetime.now().isoformat()
+            ))
+            
+            new_draft_id = cursor.lastrowid
+            
+            # Also save in translations table for record keeping
             cursor.execute('''
                 INSERT INTO translations
-                (draft_id, language, title, body, summary, approved, status)
-                VALUES (?, ?, ?, ?, ?, 0, 'pending_review')
-            ''', (draft_id, target_language, translated_title, translated_body, translated_summary))
+                (draft_id, language, title, body, summary, approved, translated_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?)
+            ''', (draft_id, target_language, translated_title, translated_body, translated_summary, datetime.now().isoformat()))
             
             translation_id = cursor.lastrowid
             conn.commit()
             conn.close()
             
-            logger.info(f"Translation saved with ID: {translation_id}")
+            logger.info(f"✅ Translation saved as new draft ID: {new_draft_id}, translation record ID: {translation_id}")
             
             return {
                 'id': translation_id,
-                'draft_id': draft_id,
+                'new_draft_id': new_draft_id,  # This is the draft ID to use for WordPress push
+                'original_draft_id': draft_id,
                 'language': target_language,
                 'title': translated_title,
                 'body': translated_body,
                 'summary': translated_summary,
-                'status': 'pending_review'
+                'word_count': word_count
             }
             
         except Exception as e:
-            logger.error(f"Error translating draft: {e}")
+            logger.error(f"❌ Error translating draft: {e}")
             return None
     
     def batch_translate(self, draft_ids: List[int], target_languages: List[str]) -> List[Dict]:
@@ -323,7 +347,7 @@ class Translator:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, language, title, body, summary, approved, status, translated_at
+                SELECT id, language, title, body, summary, approved, translated_at
                 FROM translations
                 WHERE draft_id = ?
                 ORDER BY translated_at DESC
@@ -348,7 +372,7 @@ class Translator:
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE translations
-                SET approved = 1, status = 'approved'
+                SET approved = 1
                 WHERE id = ?
             ''', (translation_id,))
             conn.commit()
