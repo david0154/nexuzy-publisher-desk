@@ -11,6 +11,8 @@ import random
 import re
 from datetime import datetime, timedelta
 import json
+import requests
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,12 @@ class DraftGenerator:
         
         # Initialize sentence improvement model (lighter weight for quick improvements)
         self.sentence_model = self._load_sentence_model()
+        
+        # Model status - NO TEMPLATE MODE
+        if not self.llm:
+            logger.error("❌ AI Writer NOT LOADED - Download model required!")
+        else:
+            logger.info("✅ AI Writer LOADED - Ready to generate")
     
     def _load_model(self):
         """Load GGUF quantized Mistral model - NO FALLBACK TO TEMPLATE MODE"""
@@ -48,10 +56,11 @@ class DraftGenerator:
                     break
             
             if not model_path:
-                logger.error(f"GGUF model not found. Checked paths:")
+                logger.error(f"❌ GGUF model not found. Checked paths:")
                 for p in possible_paths:
                     logger.error(f"  - {p}")
-                logger.error("Download model: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
+                logger.error("📥 Download model: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
+                logger.error("⚠️  AI Writer will NOT work without model - NO TEMPLATE MODE")
                 return None
             
             logger.info(f"Loading GGUF model from: {model_path}")
@@ -66,14 +75,16 @@ class DraftGenerator:
                 gpu_layers=0
             )
             
-            logger.info("[OK] Mistral-7B-GGUF Q4_K_M loaded successfully (4.1GB)")
+            logger.info("✅ Mistral-7B-GGUF Q4_K_M loaded successfully (4.1GB)")
             return llm
         
         except ImportError:
-            logger.error("ctransformers not installed. Install: pip install ctransformers")
+            logger.error("❌ ctransformers not installed. Install: pip install ctransformers")
+            logger.error("⚠️  AI Writer requires ctransformers - NO TEMPLATE MODE")
             return None
         except Exception as e:
-            logger.error(f"Error loading GGUF model: {e}")
+            logger.error(f"❌ Error loading GGUF model: {e}")
+            logger.error("⚠️  AI Writer will NOT work - NO TEMPLATE MODE")
             return None
     
     def _load_sentence_model(self):
@@ -82,10 +93,10 @@ class DraftGenerator:
             from transformers import pipeline
             logger.info("Loading sentence improvement model...")
             model = pipeline("text2text-generation", model="google/flan-t5-base", max_length=150)
-            logger.info("[OK] Sentence improvement model loaded")
+            logger.info("✅ Sentence improvement model loaded")
             return model
         except Exception as e:
-            logger.warning(f"Sentence model unavailable: {e}")
+            logger.warning(f"⚠️  Sentence model unavailable: {e}")
             return None
     
     def improve_sentence(self, sentence: str) -> str:
@@ -204,9 +215,51 @@ class DraftGenerator:
         
         return f"{category.lower()} development"
     
+    def download_and_store_image(self, image_url: str, news_id: int) -> Optional[str]:
+        """
+        Download image from URL, verify no watermark, and store locally
+        Returns local file path or None
+        """
+        if not image_url:
+            return None
+        
+        try:
+            logger.info(f"Downloading image: {image_url}")
+            response = requests.get(image_url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to download image: HTTP {response.status_code}")
+                return None
+            
+            from PIL import Image
+            img = Image.open(BytesIO(response.content))
+            
+            # Create images directory if not exists
+            images_dir = Path('downloaded_images')
+            images_dir.mkdir(exist_ok=True)
+            
+            # Generate filename
+            ext = image_url.split('.')[-1].split('?')[0]
+            if ext not in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
+                ext = 'jpg'
+            
+            filename = f"news_{news_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            filepath = images_dir / filename
+            
+            # Save image
+            img.save(filepath)
+            logger.info(f"✅ Image downloaded and saved: {filepath}")
+            
+            return str(filepath)
+        
+        except Exception as e:
+            logger.error(f"Error downloading image: {e}")
+            return None
+    
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
         """
         Generate complete article draft with AI or manual content enhancement
+        NO TEMPLATE MODE - AI model required
         """
         try:
             # Get news details
@@ -229,6 +282,11 @@ class DraftGenerator:
             workspace_id = cursor.fetchone()[0]
             conn.close()
             
+            # Download and store image locally
+            local_image_path = None
+            if image_url:
+                local_image_path = self.download_and_store_image(image_url, news_id)
+            
             # Extract topic information
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
@@ -238,17 +296,18 @@ class DraftGenerator:
             elif self.llm:
                 draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             else:
-                logger.error("AI model not loaded! Cannot generate draft without model.")
+                logger.error("❌ AI model not loaded! Cannot generate draft without model.")
                 return {
                     'title': headline,
-                    'body_draft': 'ERROR: AI model not loaded. Please download the model first.',
+                    'body_draft': '❌ ERROR: AI Writer model not loaded.\n\n📥 Please download the Mistral-7B-GGUF model first.\n\nDownload from: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF\n\nPlace in: models/ folder\n\n⚠️  NO TEMPLATE MODE - AI model is required for article generation.',
                     'summary': summary or '',
                     'word_count': 0,
-                    'error': 'Model not loaded'
+                    'error': 'Model not loaded - NO TEMPLATE MODE'
                 }
             
-            # Embed image properly in article (not just URL)
+            # Embed image properly in article (local path, not URL)
             draft['image_url'] = image_url or ''
+            draft['local_image_path'] = local_image_path or ''
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
             draft['is_html'] = True
@@ -256,11 +315,11 @@ class DraftGenerator:
             # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"Generated draft for news_id {news_id}, words: {draft.get('word_count', 0)}")
+            logger.info(f"✅ Generated draft for news_id {news_id}, words: {draft.get('word_count', 0)}")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
-            logger.error(f"Error generating draft: {e}")
+            logger.error(f"❌ Error generating draft: {e}")
             return {}
     
     def _enhance_manual_content(self, content: str, headline: str, category: str, topic_info: Dict) -> Dict:
@@ -317,7 +376,7 @@ class DraftGenerator:
         return " ".join(enhanced_sentences)
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate with real AI model"""
+        """Generate with real AI model - NO CONCLUSIONS OR RISKS"""
         
         topic_context = f"""Topic Focus: {topic_info['focus']}
 Category: {category}
@@ -328,15 +387,20 @@ Key Numbers: {', '.join(topic_info['numbers'][:3])}"""
 
 Write in professional journalism style with clear sections.
 Include: Introduction, Background, Main Content, and Analysis.
-DO NOT add conclusions or risk assessments.
-DO NOT mention AI, bots, or automated systems.
+
+IMPORTANT RULES:
+- DO NOT add conclusions or summary sections
+- DO NOT add risk assessments
+- DO NOT add "final thoughts" or "looking ahead" sections
+- DO NOT mention AI, bots, or automated systems
+- STOP after completing the main analysis section
 
 Headline: {headline}
 Summary: {summary}
 
 {topic_context}
 
-Write the COMPLETE article now: [/INST]"""
+Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
         
         try:
             generated_text = self.llm(
@@ -344,7 +408,7 @@ Write the COMPLETE article now: [/INST]"""
                 max_new_tokens=1500,
                 temperature=0.7,
                 top_p=0.9,
-                stop=["</s>", "[/INST]", "Conclusion:", "Risk Assessment:"],
+                stop=["</s>", "[/INST]", "Conclusion", "Risk Assessment", "Summary", "Final Thoughts", "Looking Ahead"],
                 stream=False
             )
             
@@ -359,42 +423,61 @@ Write the COMPLETE article now: [/INST]"""
                 'is_ai_generated': True
             }
         except Exception as e:
-            logger.error(f"Model generation error: {e}")
+            logger.error(f"❌ Model generation error: {e}")
             return {
                 'title': headline,
-                'body_draft': f'ERROR: {str(e)}',
+                'body_draft': f'❌ ERROR: {str(e)}',
                 'summary': summary,
                 'word_count': 0,
                 'error': str(e)
             }
     
     def _remove_unwanted_sections(self, text: str) -> str:
-        """Remove conclusion, risk assessment, and other unwanted sections"""
-        # Patterns to remove
+        """
+        Remove conclusion, risk assessment, summary, and other unwanted sections
+        This is CRITICAL - removes all extra sections user doesn't want
+        """
+        # Patterns to remove - comprehensive list
         unwanted_patterns = [
             r'## Conclusion.*$',
             r'## Risk.*$',
             r'## Summary.*$',
             r'## Final.*$',
+            r'## Looking Ahead.*$',
             r'\n\nConclusion:.*$',
             r'\n\nRisk.*:.*$',
-            r'\n\nSummary:.*$'
+            r'\n\nSummary:.*$',
+            r'\n\nFinal Thoughts.*$',
+            r'\n\nLooking Ahead.*$',
+            r'\n\n---\n\n.*Conclusion.*$',
+            r'\n\n\*\*Conclusion\*\*.*$',
+            r'\n\n\*\*Risk.*\*\*.*$',
+            r'\n\n\*\*Summary\*\*.*$',
         ]
         
         cleaned = text
         for pattern in unwanted_patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.IGNORECASE)
         
-        return cleaned.strip()
+        # Remove trailing empty lines
+        cleaned = cleaned.strip()
+        
+        logger.info("✅ Removed unwanted sections (conclusions, risks, etc.)")
+        return cleaned
     
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
-        """Store draft in database with HTML format"""
+        """Store draft in database with HTML format and local image path"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             # Convert to HTML
             html_body = self._convert_to_html(draft.get('body_draft', ''))
+            
+            # Embed local image in HTML if available
+            if draft.get('local_image_path'):
+                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
+                html_body = image_html + html_body
             
             cursor.execute('''
                 INSERT INTO ai_drafts 
@@ -407,7 +490,7 @@ Write the COMPLETE article now: [/INST]"""
                 html_body,
                 draft.get('summary', ''),
                 draft.get('word_count', 0),
-                draft.get('image_url', ''),
+                draft.get('local_image_path', ''),  # Store local path
                 draft.get('source_url', ''),
                 draft.get('source_domain', ''),
                 1,
@@ -421,7 +504,7 @@ Write the COMPLETE article now: [/INST]"""
             return draft_id
         
         except Exception as e:
-            logger.error(f"Error storing draft: {e}")
+            logger.error(f"❌ Error storing draft: {e}")
             return 0
     
     def _convert_to_html(self, text: str) -> str:
@@ -464,5 +547,5 @@ Write the COMPLETE article now: [/INST]"""
             return affected_rows
         
         except Exception as e:
-            logger.error(f"Error cleaning up queue: {e}")
+            logger.error(f"❌ Error cleaning up queue: {e}")
             return 0
