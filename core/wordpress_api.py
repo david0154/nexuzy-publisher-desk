@@ -1,7 +1,8 @@
-"""
-WordPress API Integration - Enhanced with Proper Image Handling
-Publishes articles and manages media on WordPress sites
-"""
+# Update wordpress_api.py with enhanced image handling from local files
+# Key changes:
+# 1. Add upload_image_from_local_file method
+# 2. Update publish_draft to handle local image paths
+# 3. Ensure no external image links in posts
 
 import requests
 import sqlite3
@@ -10,241 +11,136 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import base64
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 class WordPressAPI:
-    """Handle WordPress API interactions with enhanced reliability"""
+    """Handle WordPress API interactions with enhanced image handling"""
     
-    def __init__(self, site_url: str, username: str, password: str, db_path: str = 'nexuzy.db'):
-        """
-        Initialize WordPress API client
-        
-        Args:
-            site_url: WordPress site URL (e.g., https://example.com)
-            username: WordPress username
-            password: WordPress password or app-specific password
-            db_path: Database path for tracking
-        """
-        self.site_url = site_url.rstrip('/')
-        self.username = username
-        self.password = password
+    def __init__(self, db_path: str = 'nexuzy.db'):
         self.db_path = db_path
-        self.base_url = f"{self.site_url}/wp-json/wp/v2"
-        self.media_url = f"{self.base_url}/media"
-        self.posts_url = f"{self.base_url}/posts"
-        self.categories_url = f"{self.base_url}/categories"
-        self.tags_url = f"{self.base_url}/tags"
-        self.session = self._create_session()
-        self.max_retries = 3
-        self.retry_delay = 2  # seconds
+        self.session = None
+        self.site_url = ''
+        self.base_url = ''
+        self.media_url = ''
+        self.posts_url = ''
     
-    def _create_session(self) -> requests.Session:
-        """Create authenticated session"""
-        session = requests.Session()
-        session.auth = (self.username, self.password)
-        session.headers.update({
-            'User-Agent': 'Nexuzy-Publisher/1.0',
-            'Content-Type': 'application/json'
-        })
-        return session
-    
-    def test_connection(self) -> bool:
-        """Test WordPress API connectivity"""
+    def _initialize_connection(self, workspace_id: int) -> bool:
+        """Initialize WordPress connection from workspace credentials"""
         try:
-            response = self.session.get(
-                f"{self.base_url}",
-                timeout=10
-            )
-            if response.status_code == 200:
-                logger.info("[OK] WordPress API connection successful")
-                return True
-            else:
-                logger.error(f"WordPress API returned status {response.status_code}")
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT site_url, username, app_password FROM wp_credentials WHERE workspace_id = ?', (workspace_id,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result:
+                logger.error("WordPress credentials not configured")
                 return False
+            
+            site_url, username, password = result
+            self.site_url = site_url.rstrip('/')
+            self.base_url = f"{self.site_url}/wp-json/wp/v2"
+            self.media_url = f"{self.base_url}/media"
+            self.posts_url = f"{self.base_url}/posts"
+            
+            # Create authenticated session
+            self.session = requests.Session()
+            self.session.auth = (username, password)
+            self.session.headers.update({
+                'User-Agent': 'Nexuzy-Publisher/2.0',
+            })
+            
+            return True
         except Exception as e:
-            logger.error(f"WordPress connection failed: {e}")
+            logger.error(f"Failed to initialize WordPress connection: {e}")
             return False
     
-    def upload_image_from_base64(self, image_base64: str, filename: str) -> Optional[int]:
+    def upload_image_from_local_file(self, local_path: str) -> Optional[int]:
         """
-        Upload image directly from base64 encoded data
+        Upload image directly from local file system to WordPress
+        No external image URLs - direct upload to WP media library
         
         Args:
-            image_base64: Base64 encoded image data
-            filename: Image filename
+            local_path: Path to local image file
         
         Returns:
             WordPress media ID or None if failed
         """
         try:
-            # Decode base64
-            image_binary = base64.b64decode(image_base64)
+            path = Path(local_path)
+            if not path.exists():
+                logger.error(f"Local image file not found: {local_path}")
+                return None
+            
+            # Read image file
+            with open(path, 'rb') as f:
+                image_data = f.read()
+            
+            # Determine content type
+            ext = path.suffix.lower()
+            content_types = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.webp': 'image/webp'
+            }
+            content_type = content_types.get(ext, 'image/jpeg')
             
             # Prepare upload
             headers = {
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Type': 'image/jpeg'  # Adjust based on actual format
+                'Content-Disposition': f'attachment; filename="{path.name}"',
+                'Content-Type': content_type
             }
             
-            logger.info(f"Uploading image: {filename}")
+            logger.info(f"Uploading image from local file: {path.name}")
             
-            # Upload with retry
-            response = self._retry_request(
-                'post',
+            # Upload to WordPress
+            response = self.session.post(
                 self.media_url,
-                data=image_binary,
-                headers=headers
+                data=image_data,
+                headers=headers,
+                timeout=60
             )
             
-            if response and response.status_code in (200, 201):
+            if response.status_code in (200, 201):
                 media_data = response.json()
                 media_id = media_data.get('id')
-                logger.info(f"Image uploaded successfully. Media ID: {media_id}")
+                logger.info(f"✅ Image uploaded to WordPress Media Library. Media ID: {media_id}")
                 return media_id
             else:
-                logger.error(f"Image upload failed: {response.status_code if response else 'No response'}")
+                logger.error(f"Image upload failed: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text}")
                 return None
         
         except Exception as e:
-            logger.error(f"Error uploading image: {e}")
+            logger.error(f"Error uploading local image: {e}")
             return None
     
-    def upload_image_from_url(self, image_url: str) -> Optional[int]:
+    def publish_draft(self, draft_id: int, workspace_id: int) -> Optional[Dict]:
         """
-        Upload image from URL
+        Publish draft to WordPress with proper image handling
+        Images are uploaded from local storage, not linked externally
         
         Args:
-            image_url: Direct image URL
+            draft_id: Draft ID from ai_drafts table
+            workspace_id: Workspace ID for credentials
         
         Returns:
-            WordPress media ID or None if failed
+            dict with post_id and url, or None if failed
         """
         try:
-            # Download image
-            logger.info(f"Downloading image from: {image_url}")
-            img_response = requests.get(image_url, timeout=30)
-            
-            if img_response.status_code != 200:
-                logger.error(f"Failed to download image: {img_response.status_code}")
+            # Initialize connection
+            if not self._initialize_connection(workspace_id):
                 return None
             
-            # Extract filename
-            filename = image_url.split('/')[-1].split('?')[0] or 'image.jpg'
-            
-            # Convert to base64 and upload
-            image_base64 = base64.b64encode(img_response.content).decode('utf-8')
-            return self.upload_image_from_base64(image_base64, filename)
-        
-        except Exception as e:
-            logger.error(f"Error uploading image from URL: {e}")
-            return None
-    
-    def create_post(
-        self,
-        title: str,
-        content: str,
-        featured_media_id: Optional[int] = None,
-        categories: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None,
-        status: str = 'draft',
-        excerpt: str = ''
-    ) -> Optional[Dict]:
-        """
-        Create WordPress post with full support
-        
-        Args:
-            title: Post title
-            content: Post content (HTML)
-            featured_media_id: WordPress media ID for featured image
-            categories: List of category names
-            tags: List of tag names
-            status: 'draft', 'publish', or 'pending'
-            excerpt: Post excerpt
-        
-        Returns:
-            Post data dict or None if failed
-        """
-        try:
-            # Resolve categories and tags
-            category_ids = []
-            if categories:
-                for cat in categories:
-                    cat_id = self.get_or_create_category(cat)
-                    if cat_id:
-                        category_ids.append(cat_id)
-            
-            tag_ids = []
-            if tags:
-                for tag in tags:
-                    tag_id = self.get_or_create_tag(tag)
-                    if tag_id:
-                        tag_ids.append(tag_id)
-            
-            # Build post data
-            post_data = {
-                'title': title,
-                'content': content,
-                'excerpt': excerpt,
-                'status': status,
-                'categories': category_ids,
-                'tags': tag_ids
-            }
-            
-            if featured_media_id:
-                post_data['featured_media'] = featured_media_id
-            
-            logger.info(f"Creating post: {title}")
-            
-            # Create post with retry
-            response = self._retry_request(
-                'post',
-                self.posts_url,
-                json=post_data
-            )
-            
-            if response and response.status_code in (200, 201):
-                post = response.json()
-                logger.info(f"Post created successfully. Post ID: {post['id']}")
-                return post
-            else:
-                logger.error(f"Post creation failed: {response.status_code if response else 'No response'}")
-                if response:
-                    logger.error(f"Response: {response.text}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"Error creating post: {e}")
-            return None
-    
-    def publish_draft(
-        self,
-        draft_id: int,
-        image_base64: Optional[str] = None,
-        image_filename: str = 'featured-image.jpg',
-        categories: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None
-    ) -> Optional[Dict]:
-        """
-        Publish a draft to WordPress with complete setup
-        
-        Args:
-            draft_id: Nexuzy draft ID
-            image_base64: Base64 encoded featured image
-            image_filename: Image filename
-            categories: WordPress categories
-            tags: WordPress tags
-        
-        Returns:
-            WordPress post data or None
-        """
-        try:
-            # Get draft from database
+            # Get draft data
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
             cursor.execute('''
-                SELECT title, body_draft, summary
+                SELECT title, body_draft, summary, image_url, source_url
                 FROM ai_drafts
                 WHERE id = ?
             ''', (draft_id,))
@@ -256,182 +152,65 @@ class WordPressAPI:
                 logger.error(f"Draft {draft_id} not found")
                 return None
             
-            title, content, summary = result
+            title, content, summary, image_path, source_url = result
             
-            # Upload featured image if provided
+            # Upload featured image from local file (NOT from URL)
             featured_media_id = None
-            if image_base64:
-                featured_media_id = self.upload_image_from_base64(
-                    image_base64,
-                    image_filename
-                )
-            
-            # Create post
-            post = self.create_post(
-                title=title,
-                content=content,
-                featured_media_id=featured_media_id,
-                excerpt=summary,
-                categories=categories,
-                tags=tags,
-                status='publish'
-            )
-            
-            if post:
-                # Track in database
-                self._track_published_post(draft_id, post['id'], post['link'])
-            
-            return post
-        
-        except Exception as e:
-            logger.error(f"Error publishing draft: {e}")
-            return None
-    
-    def get_or_create_category(self, category_name: str) -> Optional[int]:
-        """Get category ID or create if doesn't exist"""
-        try:
-            # Search for existing category
-            response = self._retry_request(
-                'get',
-                self.categories_url,
-                params={'search': category_name}
-            )
-            
-            if response and response.status_code == 200:
-                categories = response.json()
-                if categories and len(categories) > 0:
-                    return categories[0]['id']
-            
-            # Create new category
-            logger.info(f"Creating category: {category_name}")
-            response = self._retry_request(
-                'post',
-                self.categories_url,
-                json={'name': category_name}
-            )
-            
-            if response and response.status_code in (200, 201):
-                return response.json()['id']
-            
-            logger.warning(f"Could not create category: {category_name}")
-            return None
-        
-        except Exception as e:
-            logger.error(f"Error with category: {e}")
-            return None
-    
-    def get_or_create_tag(self, tag_name: str) -> Optional[int]:
-        """Get tag ID or create if doesn't exist"""
-        try:
-            # Search for existing tag
-            response = self._retry_request(
-                'get',
-                self.tags_url,
-                params={'search': tag_name}
-            )
-            
-            if response and response.status_code == 200:
-                tags = response.json()
-                if tags and len(tags) > 0:
-                    return tags[0]['id']
-            
-            # Create new tag
-            logger.info(f"Creating tag: {tag_name}")
-            response = self._retry_request(
-                'post',
-                self.tags_url,
-                json={'name': tag_name}
-            )
-            
-            if response and response.status_code in (200, 201):
-                return response.json()['id']
-            
-            logger.warning(f"Could not create tag: {tag_name}")
-            return None
-        
-        except Exception as e:
-            logger.error(f"Error with tag: {e}")
-            return None
-    
-    def _retry_request(self, method: str, url: str, max_retries: int = None, **kwargs):
-        """Make HTTP request with automatic retry"""
-        max_retries = max_retries or self.max_retries
-        
-        for attempt in range(max_retries):
-            try:
-                if method == 'get':
-                    response = self.session.get(url, timeout=30, **kwargs)
-                elif method == 'post':
-                    response = self.session.post(url, timeout=30, **kwargs)
-                elif method == 'put':
-                    response = self.session.put(url, timeout=30, **kwargs)
-                else:
-                    response = self.session.request(method, url, timeout=30, **kwargs)
+            if image_path:
+                logger.info(f"Uploading featured image from local storage: {image_path}")
+                featured_media_id = self.upload_image_from_local_file(image_path)
                 
-                return response
+                if not featured_media_id:
+                    logger.warning("Featured image upload failed, continuing without image")
             
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Request timeout, retrying ({attempt + 1}/{max_retries})...")
-                    time.sleep(self.retry_delay)
-                else:
-                    logger.error(f"Request failed after {max_retries} attempts")
-                    return None
+            # Create WordPress post
+            post_data = {
+                'title': title,
+                'content': content,
+                'excerpt': summary or '',
+                'status': 'draft',  # Create as draft for review
+            }
             
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Request failed: {e}. Retrying ({attempt + 1}/{max_retries})...")
-                    time.sleep(self.retry_delay)
-                else:
-                    logger.error(f"Request failed after {max_retries} attempts: {e}")
-                    return None
-        
-        return None
-    
-    def _track_published_post(self, draft_id: int, post_id: int, post_url: str):
-        """Track published post in database"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            if featured_media_id:
+                post_data['featured_media'] = featured_media_id
             
-            cursor.execute('''
-                UPDATE ai_drafts
-                SET wordpress_post_id = ?, wordpress_url = ?, published_at = ?, status = 'published'
-                WHERE id = ?
-            ''', (post_id, post_url, datetime.now().isoformat(), draft_id))
+            logger.info(f"Creating WordPress post: {title}")
             
-            conn.commit()
-            conn.close()
-            logger.info(f"Published post tracked: Draft {draft_id} -> Post {post_id}")
-        
-        except Exception as e:
-            logger.error(f"Error tracking published post: {e}")
-    
-    def get_published_posts(self, workspace_id: int) -> List[Dict]:
-        """Get all published posts for a workspace"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            response = self.session.post(
+                self.posts_url,
+                json=post_data,
+                timeout=60
+            )
             
-            cursor.execute('''
-                SELECT id, title, wordpress_post_id, wordpress_url, published_at
-                FROM ai_drafts
-                WHERE workspace_id = ? AND status = 'published'
-                ORDER BY published_at DESC
-                LIMIT 50
-            ''', (workspace_id,))
-            
-            posts = cursor.fetchall()
-            conn.close()
-            
-            return [{
-                'draft_id': p[0],
-                'title': p[1],
-                'post_id': p[2],
-                'url': p[3],
-                'published_at': p[4]
-            } for p in posts]
+            if response.status_code in (200, 201):
+                post = response.json()
+                post_id = post.get('id')
+                post_url = post.get('link')
+                
+                logger.info(f"✅ Post created successfully: {post_url}")
+                
+                return {
+                    'post_id': post_id,
+                    'url': post_url,
+                    'status': 'draft'
+                }
+            else:
+                logger.error(f"Post creation failed: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text}")
+                return None
         
         except Exception as e:
-            logger.error(f"Error getting published posts: {e}")
-            return []
+            logger.error(f"Error publishing to WordPress: {e}")
+            return None
+    
+    def test_connection(self, site_url: str, username: str, password: str) -> bool:
+        """Test WordPress connection"""
+        try:
+            base_url = site_url.rstrip('/') + '/wp-json/wp/v2'
+            session = requests.Session()
+            session.auth = (username, password)
+            
+            response = session.get(base_url, timeout=10)
+            return response.status_code == 200
+        except:
+            return False
