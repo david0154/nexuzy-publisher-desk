@@ -30,7 +30,7 @@ def migrate_database():
     
     logger.info(f"Existing columns in news_queue: {existing_columns}")
     
-    # Add missing columns
+    # Add missing columns to news_queue
     migrations = [
         ("image_url", "ALTER TABLE news_queue ADD COLUMN image_url TEXT"),
         ("verified_score", "ALTER TABLE news_queue ADD COLUMN verified_score REAL DEFAULT 0"),
@@ -51,10 +51,17 @@ def migrate_database():
     cursor.execute("PRAGMA table_info(ai_drafts)")
     draft_columns = [col[1] for col in cursor.fetchall()]
     
+    logger.info(f"Existing columns in ai_drafts: {draft_columns}")
+    
+    # Add missing columns to ai_drafts (including source_url and source_domain)
     draft_migrations = [
         ("image_url", "ALTER TABLE ai_drafts ADD COLUMN image_url TEXT"),
         ("headline_suggestions", "ALTER TABLE ai_drafts ADD COLUMN headline_suggestions TEXT"),
         ("summary", "ALTER TABLE ai_drafts ADD COLUMN summary TEXT"),
+        ("source_url", "ALTER TABLE ai_drafts ADD COLUMN source_url TEXT"),
+        ("source_domain", "ALTER TABLE ai_drafts ADD COLUMN source_domain TEXT"),
+        ("is_html", "ALTER TABLE ai_drafts ADD COLUMN is_html BOOLEAN DEFAULT 1"),
+        ("created_at", "ALTER TABLE ai_drafts ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
     ]
     
     for column_name, sql in draft_migrations:
@@ -145,6 +152,7 @@ def migrate_database():
     logger.info("=" * 60)
     logger.info("")
     logger.info("Your database is now up to date with all required columns.")
+    logger.info("Missing columns added: source_url, source_domain in ai_drafts")
     logger.info("You can now run: python main.py")
     logger.info("")
 
