@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk, filedialog
+from tkinter import font as tkfont
 from pathlib import Path
 import logging
 from datetime import datetime
@@ -128,13 +129,14 @@ class DatabaseSetup:
         cursor.execute('CREATE TABLE IF NOT EXISTS workspaces (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         cursor.execute('CREATE TABLE IF NOT EXISTS rss_feeds (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, feed_name TEXT NOT NULL, url TEXT NOT NULL, category TEXT DEFAULT "General", enabled BOOLEAN DEFAULT 1, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id), UNIQUE(workspace_id, url))')
         cursor.execute('CREATE TABLE IF NOT EXISTS news_queue (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, headline TEXT NOT NULL, summary TEXT, source_url TEXT, source_domain TEXT, category TEXT, publish_date TEXT, image_url TEXT, verified_score REAL DEFAULT 0, verified_sources INTEGER DEFAULT 1, fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, status TEXT DEFAULT "new", FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
-        cursor.execute('CREATE TABLE IF NOT EXISTS ai_drafts (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, news_id INTEGER, title TEXT, headline_suggestions TEXT, body_draft TEXT, summary TEXT, image_url TEXT, word_count INTEGER DEFAULT 0, generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
+        cursor.execute('CREATE TABLE IF NOT EXISTS ai_drafts (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, news_id INTEGER, title TEXT, headline_suggestions TEXT, body_draft TEXT, summary TEXT, image_url TEXT, source_url TEXT, word_count INTEGER DEFAULT 0, generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS translations (id INTEGER PRIMARY KEY, draft_id INTEGER NOT NULL, language TEXT, title TEXT, body TEXT, approved BOOLEAN DEFAULT 0, translated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (draft_id) REFERENCES ai_drafts(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS wp_credentials (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, site_url TEXT, username TEXT, app_password TEXT, connected BOOLEAN DEFAULT 0, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS ads_settings (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, header_code TEXT, footer_code TEXT, content_code TEXT, enabled BOOLEAN DEFAULT 1, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS news_groups (id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, group_hash TEXT, source_count INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (workspace_id) REFERENCES workspaces(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS grouped_news (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, news_id INTEGER NOT NULL, similarity_score REAL, FOREIGN KEY (group_id) REFERENCES news_groups(id), FOREIGN KEY (news_id) REFERENCES news_queue(id))')
         cursor.execute('CREATE TABLE IF NOT EXISTS scraped_facts (id INTEGER PRIMARY KEY, news_id INTEGER NOT NULL, fact_type TEXT, content TEXT, confidence REAL DEFAULT 0.5, source_url TEXT, FOREIGN KEY (news_id) REFERENCES news_queue(id))')
+        cursor.execute('CREATE TABLE IF NOT EXISTS wordpress_posts (id INTEGER PRIMARY KEY, draft_id INTEGER NOT NULL, wp_post_id INTEGER, wp_site_url TEXT, status TEXT DEFAULT "draft", published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (draft_id) REFERENCES ai_drafts(id))')
         
         conn.commit()
         conn.close()
@@ -161,12 +163,115 @@ class ModernButton(tk.Button):
         self.bind('<Enter>', lambda e: self.config(bg=COLORS['hover']))
         self.bind('<Leave>', lambda e: self.config(bg=self.default_bg))
 
+class WYSIWYGEditor(tk.Frame):
+    """Modern WYSIWYG text editor with formatting toolbar"""
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, bg=COLORS['white'])
+        
+        # Toolbar
+        toolbar = tk.Frame(self, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
+        
+        # Formatting buttons
+        tk.Button(toolbar, text="B", font=('Segoe UI', 10, 'bold'), command=self.make_bold, 
+                 bg=COLORS['white'], relief=tk.FLAT, padx=10).pack(side=tk.LEFT, padx=2, pady=5)
+        tk.Button(toolbar, text="I", font=('Segoe UI', 10, 'italic'), command=self.make_italic,
+                 bg=COLORS['white'], relief=tk.FLAT, padx=10).pack(side=tk.LEFT, padx=2, pady=5)
+        tk.Button(toolbar, text="U", font=('Segoe UI', 10, 'underline'), command=self.make_underline,
+                 bg=COLORS['white'], relief=tk.FLAT, padx=10).pack(side=tk.LEFT, padx=2, pady=5)
+        
+        tk.Frame(toolbar, width=2, bg=COLORS['border']).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        tk.Button(toolbar, text="H1", command=lambda: self.insert_heading(1),
+                 bg=COLORS['white'], relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=2)
+        tk.Button(toolbar, text="H2", command=lambda: self.insert_heading(2),
+                 bg=COLORS['white'], relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=2)
+        
+        tk.Frame(toolbar, width=2, bg=COLORS['border']).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        tk.Button(toolbar, text="• List", command=self.insert_bullet,
+                 bg=COLORS['white'], relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=2)
+        tk.Button(toolbar, text="1. List", command=self.insert_numbered,
+                 bg=COLORS['white'], relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=2)
+        
+        tk.Frame(toolbar, width=2, bg=COLORS['border']).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        tk.Button(toolbar, text="🖼️ Image", command=self.insert_image_placeholder,
+                 bg=COLORS['white'], relief=tk.FLAT, padx=8).pack(side=tk.LEFT, padx=2)
+        
+        # Text widget
+        text_frame = tk.Frame(self, bg=COLORS['white'])
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.text = scrolledtext.ScrolledText(text_frame, font=('Segoe UI', 11), 
+                                              wrap=tk.WORD, undo=True, **kwargs)
+        self.text.pack(fill=tk.BOTH, expand=True)
+        
+        # Configure tags for formatting
+        bold_font = tkfont.Font(family='Segoe UI', size=11, weight='bold')
+        italic_font = tkfont.Font(family='Segoe UI', size=11, slant='italic')
+        heading1_font = tkfont.Font(family='Segoe UI', size=18, weight='bold')
+        heading2_font = tkfont.Font(family='Segoe UI', size=14, weight='bold')
+        
+        self.text.tag_configure('bold', font=bold_font)
+        self.text.tag_configure('italic', font=italic_font)
+        self.text.tag_configure('underline', underline=True)
+        self.text.tag_configure('h1', font=heading1_font, spacing3=10)
+        self.text.tag_configure('h2', font=heading2_font, spacing3=8)
+    
+    def make_bold(self):
+        try:
+            self.text.tag_add('bold', 'sel.first', 'sel.last')
+        except:
+            pass
+    
+    def make_italic(self):
+        try:
+            self.text.tag_add('italic', 'sel.first', 'sel.last')
+        except:
+            pass
+    
+    def make_underline(self):
+        try:
+            self.text.tag_add('underline', 'sel.first', 'sel.last')
+        except:
+            pass
+    
+    def insert_heading(self, level):
+        tag = f'h{level}'
+        try:
+            self.text.tag_add(tag, 'insert linestart', 'insert lineend')
+        except:
+            pass
+    
+    def insert_bullet(self):
+        self.text.insert(tk.INSERT, "\n• ")
+    
+    def insert_numbered(self):
+        self.text.insert(tk.INSERT, "\n1. ")
+    
+    def insert_image_placeholder(self):
+        self.text.insert(tk.INSERT, "\n[IMAGE: Insert image URL here]\n")
+    
+    def get(self, *args):
+        return self.text.get(*args)
+    
+    def insert(self, *args):
+        return self.text.insert(*args)
+    
+    def delete(self, *args):
+        return self.text.delete(*args)
+
 class NexuzyPublisherApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Nexuzy Publisher Desk - Complete AI Platform")
         self.geometry("1400x800")
         self.configure(bg=COLORS['white'])
+        
+        # Set application icon
+        self._set_app_icon()
         
         self.db_path = 'nexuzy.db'
         self.current_workspace = None
@@ -180,6 +285,18 @@ class NexuzyPublisherApp(tk.Tk):
         self.create_modern_ui()
         self.load_workspaces()
         self.show_dashboard()
+    
+    def _set_app_icon(self):
+        """Set application icon and logo"""
+        try:
+            icon_path = Path('resources/icon.ico')
+            if icon_path.exists():
+                self.iconbitmap(str(icon_path))
+                logger.info("[OK] Application icon loaded")
+            else:
+                logger.warning("Icon file not found at resources/icon.ico")
+        except Exception as e:
+            logger.warning(f"Could not load icon: {e}")
     
     def _import_modules(self):
         try:
@@ -224,12 +341,32 @@ class NexuzyPublisherApp(tk.Tk):
         except:
             self.translator = None
             self.models_status['translator'] = 'Not Available'
+        
+        try:
+            from core.wordpress_api import WordPressAPI
+            self.wordpress_api = WordPressAPI(self.db_path)
+            logger.info("[OK] WordPress API")
+        except:
+            self.wordpress_api = None
+            logger.warning("WordPress API unavailable")
     
     def create_modern_ui(self):
         # Header
         header = tk.Frame(self, bg=COLORS['dark'], height=70)
         header.pack(side=tk.TOP, fill=tk.X)
         header.pack_propagate(False)
+        
+        # Logo
+        try:
+            logo_path = Path('resources/logo.png')
+            if logo_path.exists():
+                from PIL import Image, ImageTk
+                logo_img = Image.open(logo_path)
+                logo_img = logo_img.resize((50, 50), Image.Resampling.LANCZOS)
+                self.logo_photo = ImageTk.PhotoImage(logo_img)
+                tk.Label(header, image=self.logo_photo, bg=COLORS['dark']).pack(side=tk.LEFT, padx=10)
+        except:
+            pass
         
         title_frame = tk.Frame(header, bg=COLORS['dark'])
         title_frame.pack(side=tk.LEFT, padx=20, pady=15)
@@ -626,7 +763,7 @@ class NexuzyPublisherApp(tk.Tk):
             self._show_no_workspace_error()
             return
         
-        tk.Label(self.content_frame, text="AI Complete Rewrite Editor", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
+        tk.Label(self.content_frame, text="AI Complete Rewrite Editor with WYSIWYG", font=('Segoe UI', 20, 'bold'), bg=COLORS['white']).pack(padx=30, pady=20, anchor=tk.W)
         
         main_panel = tk.Frame(self.content_frame, bg=COLORS['white'])
         main_panel.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
@@ -656,7 +793,7 @@ class NexuzyPublisherApp(tk.Tk):
         right_panel = tk.Frame(main_panel, bg=COLORS['light'], relief=tk.RAISED, borderwidth=1)
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
-        tk.Label(right_panel, text="✍️ Rewritten Article", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=15, pady=10, anchor=tk.W)
+        tk.Label(right_panel, text="✍️ Rewritten Article (WYSIWYG)", font=('Segoe UI', 14, 'bold'), bg=COLORS['light']).pack(padx=15, pady=10, anchor=tk.W)
         
         details_frame = tk.Frame(right_panel, bg=COLORS['white'])
         details_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -670,18 +807,22 @@ class NexuzyPublisherApp(tk.Tk):
         self.draft_url.pack(fill=tk.X, pady=2)
         
         tk.Label(details_frame, text="Image URL:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
-        self.draft_image_url = tk.Entry(details_frame, font=('Segoe UI', 10))
-        self.draft_image_url.pack(fill=tk.X, pady=2)
+        image_url_frame = tk.Frame(details_frame, bg=COLORS['white'])
+        image_url_frame.pack(fill=tk.X, pady=2)
+        self.draft_image_url = tk.Entry(image_url_frame, font=('Segoe UI', 10))
+        self.draft_image_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ModernButton(image_url_frame, "🔍 Check Watermark", self.check_image_watermark, 'danger').pack(side=tk.LEFT, padx=5)
         
-        tk.Label(details_frame, text="Full Article:", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
-        self.draft_body = scrolledtext.ScrolledText(details_frame, font=('Segoe UI', 10), wrap=tk.WORD, height=15)
+        tk.Label(details_frame, text="Full Article (WYSIWYG Editor):", font=('Segoe UI', 10, 'bold'), bg=COLORS['white']).pack(anchor=tk.W, pady=(10, 2))
+        self.draft_body = WYSIWYGEditor(details_frame, height=12)
         self.draft_body.pack(fill=tk.BOTH, expand=True, pady=2)
         
         save_frame = tk.Frame(right_panel, bg=COLORS['light'])
         save_frame.pack(fill=tk.X, padx=10, pady=10)
         
         ModernButton(save_frame, "💾 Save Draft", self.save_ai_draft, 'warning').pack(side=tk.LEFT, padx=2)
-        ModernButton(save_frame, "📋 Copy", self.copy_draft, 'primary').pack(side=tk.LEFT, padx=2)
+        ModernButton(save_frame, "🌐 Translate", self.translate_current_draft, 'primary').pack(side=tk.LEFT, padx=2)
+        ModernButton(save_frame, "📤 Push to WordPress", self.publish_to_wordpress, 'success').pack(side=tk.LEFT, padx=2)
         ModernButton(save_frame, "🗑️ Clear", self.clear_draft, 'danger').pack(side=tk.LEFT, padx=2)
         
         self.load_editor_news()
@@ -740,8 +881,60 @@ class NexuzyPublisherApp(tk.Tk):
             content += f"URL: {news['url']}\n"
             if news['image_url']:
                 content += f"Image: {news['image_url']}\n\n"
-            content += "Click 'Complete AI Rewrite' to generate full 800-1500 word article..."
+            content += "Click 'Complete AI Rewrite' to generate full 800-1500 word article with proper topic understanding..."
             self.draft_body.insert(tk.END, content)
+    
+    def check_image_watermark(self):
+        """Check image for watermark using Vision AI"""
+        image_url = self.draft_image_url.get().strip()
+        if not image_url:
+            messagebox.showwarning("Warning", "No image URL provided")
+            return
+        
+        if not self.vision_ai:
+            messagebox.showerror("Error", "Vision AI not available. Install: pip install torch transformers pillow")
+            return
+        
+        self.update_status("Checking watermark...", 'warning')
+        
+        def check_thread():
+            try:
+                # Download image temporarily
+                import requests
+                from PIL import Image
+                from io import BytesIO
+                
+                response = requests.get(image_url, timeout=10)
+                img = Image.open(BytesIO(response.content))
+                
+                # Save temporarily
+                temp_path = 'temp_image.jpg'
+                img.save(temp_path)
+                
+                # Check watermark
+                result = self.vision_ai.detect_watermark(temp_path)
+                
+                # Clean up
+                os.remove(temp_path)
+                
+                self.after(0, lambda: self._watermark_check_complete(result))
+            except Exception as e:
+                self.after(0, lambda: self._watermark_check_error(str(e)))
+        
+        threading.Thread(target=check_thread, daemon=True).start()
+    
+    def _watermark_check_complete(self, result):
+        self.update_status("Watermark check complete", 'success')
+        
+        if result['watermark_detected']:
+            msg = f"⚠️ WATERMARK DETECTED!\n\nConfidence: {result['confidence']}\n\n{result['status']}\n\nRecommendation: Please replace this image with a watermark-free version."
+            messagebox.showwarning("Watermark Detected", msg)
+        else:
+            messagebox.showinfo("Clear", f"✓ No watermark detected.\n\nConfidence: {result['confidence']}\n\nImage is clear to use.")
+    
+    def _watermark_check_error(self, error):
+        self.update_status("Watermark check failed", 'danger')
+        messagebox.showerror("Error", f"Failed to check watermark:\n{error}")
     
     def generate_ai_draft_real(self):
         if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
@@ -763,7 +956,7 @@ class NexuzyPublisherApp(tk.Tk):
             messagebox.showerror("Error", "Draft Generator unavailable")
             return
         
-        self.update_status("Generating complete article...", 'warning')
+        self.update_status("Generating complete article with topic understanding...", 'warning')
         
         def generate_thread():
             try:
@@ -785,14 +978,138 @@ class NexuzyPublisherApp(tk.Tk):
         
         if hasattr(self, 'draft_body'):
             self.draft_body.delete('1.0', tk.END)
-            self.draft_body.insert(tk.END, draft.get('body_draft', 'No content'))
+            body = draft.get('body_draft', 'No content')
+            # Insert image properly in article
+            if news.get('image_url'):
+                body = f"[IMAGE: {news['image_url']}]\n\n" + body
+            self.draft_body.insert(tk.END, body)
+        
+        self.current_draft_id = draft.get('id')
         
         self.update_status(f"Generated! {draft.get('word_count', 0)} words", 'success')
-        messagebox.showinfo("Success", f"Article generated!\nWords: {draft.get('word_count', 0)}")
+        messagebox.showinfo("Success", f"Article generated with topic understanding!\nWords: {draft.get('word_count', 0)}")
     
     def _draft_error(self, error):
         self.update_status("Generation error", 'danger')
         messagebox.showerror("Error", f"Failed:\n{error}")
+    
+    def translate_current_draft(self):
+        """Translate current draft directly"""
+        if not hasattr(self, 'current_draft_id') or not self.current_draft_id:
+            messagebox.showwarning("Warning", "Save draft first before translating")
+            return
+        
+        if not self.translator:
+            messagebox.showerror("Error", "Translator not available")
+            return
+        
+        # Create language selection dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Select Translation Language")
+        dialog.geometry("400x500")
+        dialog.configure(bg=COLORS['white'])
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        tk.Label(dialog, text="Select Target Language", font=('Segoe UI', 14, 'bold'), bg=COLORS['white']).pack(pady=20)
+        
+        list_frame = tk.Frame(dialog, bg=COLORS['white'])
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        lang_listbox = tk.Listbox(list_frame, font=('Segoe UI', 10), yscrollcommand=scrollbar.set)
+        lang_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=lang_listbox.yview)
+        
+        for lang in TRANSLATION_LANGUAGES:
+            lang_listbox.insert(tk.END, lang)
+        
+        def do_translate():
+            selection = lang_listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Warning", "Select a language", parent=dialog)
+                return
+            
+            target_lang = TRANSLATION_LANGUAGES[selection[0]]
+            dialog.destroy()
+            
+            self.update_status(f"Translating to {target_lang}...", 'warning')
+            
+            def translate_thread():
+                try:
+                    translation = self.translator.translate_draft(self.current_draft_id, target_lang)
+                    self.after(0, lambda: self._translation_complete(translation, target_lang))
+                except Exception as e:
+                    self.after(0, lambda: self._translation_error(str(e)))
+            
+            threading.Thread(target=translate_thread, daemon=True).start()
+        
+        ModernButton(dialog, "Translate", do_translate, 'success').pack(pady=20)
+    
+    def _translation_complete(self, translation, target_lang):
+        if not translation:
+            messagebox.showerror("Error", "Translation failed")
+            return
+        
+        self.update_status(f"Translated to {target_lang}", 'success')
+        
+        # Show translation in new window
+        view_window = tk.Toplevel(self)
+        view_window.title(f"Translation: {target_lang}")
+        view_window.geometry("800x600")
+        view_window.configure(bg=COLORS['white'])
+        
+        tk.Label(view_window, text=f"Translation: {target_lang}", font=('Segoe UI', 16, 'bold'), bg=COLORS['white']).pack(padx=20, pady=10)
+        tk.Label(view_window, text=f"Title: {translation.get('title', '')}", font=('Segoe UI', 12), bg=COLORS['white']).pack(padx=20, pady=5)
+        
+        text_frame = tk.Frame(view_window, bg=COLORS['white'])
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        text_widget = scrolledtext.ScrolledText(text_frame, font=('Segoe UI', 10), wrap=tk.WORD)
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        text_widget.insert(tk.END, translation.get('body', ''))
+        text_widget.config(state=tk.DISABLED)
+        
+        messagebox.showinfo("Success", f"Translated to {target_lang}!")
+    
+    def _translation_error(self, error):
+        self.update_status("Translation error", 'danger')
+        messagebox.showerror("Error", f"Failed:\n{error}")
+    
+    def publish_to_wordpress(self):
+        """Publish current draft to WordPress"""
+        if not hasattr(self, 'current_draft_id') or not self.current_draft_id:
+            messagebox.showwarning("Warning", "Save draft first before publishing")
+            return
+        
+        if not self.wordpress_api:
+            messagebox.showerror("Error", "WordPress API not available")
+            return
+        
+        if messagebox.askyesno("Confirm", "Publish this draft to WordPress as draft post?"):
+            self.update_status("Publishing to WordPress...", 'warning')
+            
+            def publish_thread():
+                try:
+                    result = self.wordpress_api.publish_draft(self.current_draft_id, self.current_workspace_id)
+                    self.after(0, lambda: self._publish_complete(result))
+                except Exception as e:
+                    self.after(0, lambda: self._publish_error(str(e)))
+            
+            threading.Thread(target=publish_thread, daemon=True).start()
+    
+    def _publish_complete(self, result):
+        if result:
+            self.update_status("Published to WordPress!", 'success')
+            messagebox.showinfo("Success", f"Published to WordPress!\n\nPost ID: {result['post_id']}\nURL: {result['url']}\n\nStatus: Draft (review in WordPress)")
+        else:
+            messagebox.showerror("Error", "Failed to publish. Check WordPress credentials in WordPress settings.")
+    
+    def _publish_error(self, error):
+        self.update_status("Publish failed", 'danger')
+        messagebox.showerror("Error", f"Failed to publish:\n{error}")
     
     def save_ai_draft(self):
         if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
@@ -812,6 +1129,7 @@ class NexuzyPublisherApp(tk.Tk):
         title = self.draft_title.get().strip()
         body = self.draft_body.get('1.0', tk.END).strip()
         img_url = self.draft_image_url.get().strip()
+        source_url = self.draft_url.get().strip()
         
         if not title or not body or len(body) < 100:
             messagebox.showwarning("Warning", "Generate article first")
@@ -821,26 +1139,15 @@ class NexuzyPublisherApp(tk.Tk):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             word_count = len(body.split())
-            cursor.execute('INSERT INTO ai_drafts (workspace_id, news_id, title, body_draft, image_url, word_count) VALUES (?, ?, ?, ?, ?, ?)',
-                          (self.current_workspace_id, news['id'], title, body, img_url, word_count))
+            cursor.execute('INSERT INTO ai_drafts (workspace_id, news_id, title, body_draft, image_url, source_url, word_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                          (self.current_workspace_id, news['id'], title, body, img_url, source_url, word_count))
+            self.current_draft_id = cursor.lastrowid
             conn.commit()
             conn.close()
             self.update_status("Draft saved!", 'success')
-            messagebox.showinfo("Success", f"Saved! Words: {word_count}")
+            messagebox.showinfo("Success", f"Saved! Words: {word_count}\nDraft ID: {self.current_draft_id}")
         except Exception as e:
             messagebox.showerror("Error", f"Save failed:\n{e}")
-    
-    def copy_draft(self):
-        if not hasattr(self, 'draft_body'):
-            return
-        draft_text = self.draft_body.get('1.0', tk.END).strip()
-        if not draft_text:
-            messagebox.showwarning("Warning", "No draft")
-            return
-        self.clipboard_clear()
-        self.clipboard_append(draft_text)
-        self.update_status("Copied!", 'success')
-        messagebox.showinfo("Success", "Copied!")
     
     def clear_draft(self):
         if hasattr(self, 'draft_title'):
@@ -1053,13 +1360,13 @@ class NexuzyPublisherApp(tk.Tk):
         def translate_thread():
             try:
                 translation = self.translator.translate_draft(draft_id, target_lang)
-                self.after(0, lambda: self._translation_complete(translation))
+                self.after(0, lambda: self._translation_preview_complete(translation))
             except Exception as e:
                 self.after(0, lambda: self._translation_error(str(e)))
         
         threading.Thread(target=translate_thread, daemon=True).start()
     
-    def _translation_complete(self, translation):
+    def _translation_preview_complete(self, translation):
         if not translation:
             messagebox.showerror("Error", "Translation failed")
             return
@@ -1073,10 +1380,6 @@ class NexuzyPublisherApp(tk.Tk):
         
         self.update_status(f"Translated to {translation.get('language', '')}", 'success')
         messagebox.showinfo("Success", f"Translated to {translation.get('language', '')}!")
-    
-    def _translation_error(self, error):
-        self.update_status("Translation error", 'danger')
-        messagebox.showerror("Error", f"Failed:\n{error}")
     
     def show_wordpress_config(self):
         self.clear_content()
@@ -1160,7 +1463,39 @@ class NexuzyPublisherApp(tk.Tk):
             messagebox.showerror("Error", f"Failed:\n{e}")
     
     def test_wordpress_connection(self):
-        messagebox.showinfo("Test", "WordPress connection test will be implemented.")
+        if not self.wordpress_api:
+            messagebox.showerror("Error", "WordPress API unavailable")
+            return
+        
+        url = self.wp_url_entry.get().strip()
+        username = self.wp_user_entry.get().strip()
+        password = self.wp_pass_entry.get().strip()
+        
+        if not url or not username or not password:
+            messagebox.showerror("Error", "Fill all fields")
+            return
+        
+        self.update_status("Testing connection...", 'warning')
+        
+        def test_thread():
+            try:
+                result = self.wordpress_api.test_connection(url, username, password)
+                self.after(0, lambda: self._test_complete(result))
+            except Exception as e:
+                self.after(0, lambda: self._test_error(str(e)))
+        
+        threading.Thread(target=test_thread, daemon=True).start()
+    
+    def _test_complete(self, result):
+        if result:
+            self.update_status("WordPress connected!", 'success')
+            messagebox.showinfo("Success", "✓ Connection successful!\n\nWordPress REST API is working properly.")
+        else:
+            messagebox.showerror("Failed", "✗ Connection failed!\n\nCheck:\n- URL is correct\n- Username is correct\n- App Password is valid\n- WordPress REST API is enabled")
+    
+    def _test_error(self, error):
+        self.update_status("Test failed", 'danger')
+        messagebox.showerror("Error", f"Test failed:\n{error}")
     
     def show_vision_ai(self):
         self.clear_content()
