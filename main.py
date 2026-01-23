@@ -755,7 +755,7 @@ class NexuzyPublisherApp(tk.Tk):
         self.update_status("Error grouping", 'danger')
         messagebox.showerror("Error", f"Failed:\n{error}")
     
-    def show_editor(self):
+    def show_editor(self, draft_id_to_edit=None):
         self.clear_content()
         self.update_status("AI Editor", 'success')
         
@@ -826,6 +826,8 @@ class NexuzyPublisherApp(tk.Tk):
         ModernButton(save_frame, "🗑️ Clear", self.clear_draft, 'danger').pack(side=tk.LEFT, padx=2)
         
         self.load_editor_news()
+        if draft_id_to_edit:
+            self.load_draft_into_editor(draft_id_to_edit)
     
     def load_editor_news(self):
         if not hasattr(self, 'editor_news_list'):
@@ -1052,27 +1054,56 @@ class NexuzyPublisherApp(tk.Tk):
         if not translation:
             messagebox.showerror("Error", "Translation failed")
             return
-        
+
         self.update_status(f"Translated to {target_lang}", 'success')
-        
-        # Show translation in new window
+
+        # Show translation in a new, more functional window
         view_window = tk.Toplevel(self)
-        view_window.title(f"Translation: {target_lang}")
-        view_window.geometry("800x600")
+        view_window.title(f"Translation Preview: {target_lang}")
+        view_window.geometry("800x650")
         view_window.configure(bg=COLORS['white'])
+
+        header_frame = tk.Frame(view_window, bg=COLORS['white'])
+        header_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        tk.Label(view_window, text=f"Translation: {target_lang}", font=('Segoe UI', 16, 'bold'), bg=COLORS['white']).pack(padx=20, pady=10)
-        tk.Label(view_window, text=f"Title: {translation.get('title', '')}", font=('Segoe UI', 12), bg=COLORS['white']).pack(padx=20, pady=5)
-        
-        text_frame = tk.Frame(view_window, bg=COLORS['white'])
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        text_widget = scrolledtext.ScrolledText(text_frame, font=('Segoe UI', 10), wrap=tk.WORD)
-        text_widget.pack(fill=tk.BOTH, expand=True)
+        tk.Label(header_frame, text=f"Translation: {target_lang}", font=('Segoe UI', 16, 'bold'), bg=COLORS['white']).pack(side=tk.LEFT)
+
+        title_entry = tk.Entry(view_window, font=('Segoe UI', 12, 'bold'), relief=tk.FLAT, bg=COLORS['light'])
+        title_entry.insert(0, translation.get('title', ''))
+        title_entry.pack(fill=tk.X, padx=20, pady=5, ipady=4)
+
+        text_widget = scrolledtext.ScrolledText(view_window, font=('Segoe UI', 11), wrap=tk.WORD, relief=tk.FLAT, borderwidth=1)
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         text_widget.insert(tk.END, translation.get('body', ''))
-        text_widget.config(state=tk.DISABLED)
-        
-        messagebox.showinfo("Success", f"Translated to {target_lang}!")
+
+        button_frame = tk.Frame(view_window, bg=COLORS['white'])
+        button_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        def save_as_draft():
+            new_draft_id = translation.get('new_draft_id')
+            if not new_draft_id:
+                messagebox.showerror("Error", "No new draft ID found in translation data.", parent=view_window)
+                return
+
+            try:
+                # Update the draft with any edits made in the preview window
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE ai_drafts SET title = ?, body_draft = ? WHERE id = ?",
+                    (title_entry.get(), text_widget.get("1.0", tk.END), new_draft_id)
+                )
+                conn.commit()
+                conn.close()
+
+                messagebox.showinfo("Success", f"Translation saved as Draft ID: {new_draft_id}", parent=view_window)
+                self.load_saved_drafts() # Refresh the drafts list if it's visible
+                view_window.destroy()
+            except Exception as e:
+                messagebox.showerror("Database Error", f"Failed to save updated draft: {e}", parent=view_window)
+
+        ModernButton(button_frame, "💾 Save as Editable Draft", save_as_draft, color='success').pack(side=tk.LEFT, padx=10)
+        ModernButton(button_frame, "🗑️ Close", view_window.destroy, color='danger').pack(side=tk.RIGHT, padx=10)
     
     def _translation_error(self, error):
         self.update_status("Translation error", 'danger')
@@ -1110,42 +1141,76 @@ class NexuzyPublisherApp(tk.Tk):
     def _publish_error(self, error):
         self.update_status("Publish failed", 'danger')
         messagebox.showerror("Error", f"Failed to publish:\n{error}")
+
+    def load_draft_into_editor(self, draft_id):
+        """Loads a draft's content into the editor fields."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT title, body_draft, image_url, source_url FROM ai_drafts WHERE id = ?', (draft_id,))
+            draft_data = cursor.fetchone()
+            conn.close()
+
+            if draft_data:
+                title, body, img_url, source_url = draft_data
+                self.draft_title.delete(0, tk.END)
+                self.draft_title.insert(0, title)
+                self.draft_url.delete(0, tk.END)
+                self.draft_url.insert(0, source_url or "")
+                self.draft_image_url.delete(0, tk.END)
+                self.draft_image_url.insert(0, img_url or "")
+                self.draft_body.delete('1.0', tk.END)
+                self.draft_body.insert('1.0', body)
+
+                # Set current_draft_id so 'Save' updates the correct draft
+                self.current_draft_id = draft_id
+                self.update_status(f"Editing Draft ID: {draft_id}", "warning")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load draft: {e}")
     
     def save_ai_draft(self):
-        if not hasattr(self, 'editor_news_list') or not hasattr(self, 'news_items_data'):
-            messagebox.showwarning("Warning", "No news selected")
-            return
-        
-        selection = self.editor_news_list.curselection()
-        if not selection:
-            messagebox.showwarning("Warning", "Select news")
-            return
-        
-        idx = selection[0]
-        if idx >= len(self.news_items_data):
-            return
-        
-        news = self.news_items_data[idx]
         title = self.draft_title.get().strip()
         body = self.draft_body.get('1.0', tk.END).strip()
         img_url = self.draft_image_url.get().strip()
         source_url = self.draft_url.get().strip()
-        
+
         if not title or not body or len(body) < 100:
-            messagebox.showwarning("Warning", "Generate article first")
+            messagebox.showwarning("Warning", "Title and body are required (min 100 chars).")
             return
-        
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             word_count = len(body.split())
-            cursor.execute('INSERT INTO ai_drafts (workspace_id, news_id, title, body_draft, image_url, source_url, word_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                          (self.current_workspace_id, news['id'], title, body, img_url, source_url, word_count))
-            self.current_draft_id = cursor.lastrowid
+
+            if hasattr(self, 'current_draft_id') and self.current_draft_id:
+                # Update existing draft
+                cursor.execute('''
+                    UPDATE ai_drafts
+                    SET title = ?, body_draft = ?, image_url = ?, source_url = ?, word_count = ?
+                    WHERE id = ?
+                ''', (title, body, img_url, source_url, word_count, self.current_draft_id))
+                message = f"Draft ID: {self.current_draft_id} updated successfully!"
+            else:
+                # This part is for creating a new draft from a news item
+                if not hasattr(self, 'editor_news_list') or not self.editor_news_list.curselection():
+                     messagebox.showwarning("Warning", "Select a news item from the left to create a new draft.")
+                     return
+                idx = self.editor_news_list.curselection()[0]
+                news_id = self.news_items_data[idx]['id']
+
+                cursor.execute('''
+                    INSERT INTO ai_drafts (workspace_id, news_id, title, body_draft, image_url, source_url, word_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (self.current_workspace_id, news_id, title, body, img_url, source_url, word_count))
+                self.current_draft_id = cursor.lastrowid
+                message = f"New draft saved! Words: {word_count}\nDraft ID: {self.current_draft_id}"
+
             conn.commit()
             conn.close()
             self.update_status("Draft saved!", 'success')
-            messagebox.showinfo("Success", f"Saved! Words: {word_count}\nDraft ID: {self.current_draft_id}")
+            messagebox.showinfo("Success", message)
+            self.load_saved_drafts() # Refresh list
         except Exception as e:
             messagebox.showerror("Error", f"Save failed:\n{e}")
     
@@ -1175,6 +1240,7 @@ class NexuzyPublisherApp(tk.Tk):
         btn_frame.pack(padx=30, pady=10, anchor=tk.W)
         
         ModernButton(btn_frame, "🔄 Refresh", self.load_saved_drafts, 'primary').pack(side=tk.LEFT, padx=5)
+        ModernButton(btn_frame, "✍️ Edit Selected", self.edit_selected_draft, color='success').pack(side=tk.LEFT, padx=5)
         ModernButton(btn_frame, "🗑️ Delete", self.delete_selected_draft, 'danger').pack(side=tk.LEFT, padx=5)
         
         list_frame = tk.Frame(self.content_frame, bg=COLORS['white'])
@@ -1250,6 +1316,18 @@ class NexuzyPublisherApp(tk.Tk):
                 text_widget.config(state=tk.DISABLED)
         except Exception as e:
             messagebox.showerror("Error", f"Failed:\n{e}")
+
+    def edit_selected_draft(self):
+        selection = self.saved_drafts_list.curselection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a draft to edit.")
+            return
+
+        idx = selection[0]
+        draft_id_to_edit = self.drafts_data[idx]['id']
+
+        # Now, open the editor view and load the draft's content.
+        self.show_editor(draft_id_to_edit=draft_id_to_edit)
     
     def delete_selected_draft(self):
         selection = self.saved_drafts_list.curselection()
