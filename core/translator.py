@@ -121,9 +121,9 @@ class Translator:
         content = f"{text}:{target_language}"
         return hashlib.md5(content.encode()).hexdigest()
     
-    def translate_text(self, text: str, target_language: str, force_refresh: bool = False) -> str:
+    def translate_text(self, text: str, target_language: str, force_refresh: bool = False) -> Tuple[str, bool]:
         """
-        Translate text to target language with caching
+        Translate text to target language with caching and fallback reporting.
         
         Args:
             text: Text to translate
@@ -131,37 +131,32 @@ class Translator:
             force_refresh: Skip cache and force new translation
         
         Returns:
-            Translated text
+            A tuple containing the translated text and a boolean indicating if fallback was used.
         """
         if not text or not text.strip():
-            return text
+            return text, False
         
-        # Check cache first
         cache_key = self._get_cache_key(text, target_language)
         if not force_refresh and cache_key in self.translation_cache:
             logger.debug(f"Using cached translation for {target_language}")
             return self.translation_cache[cache_key]
-        
-        # Validate language
+
         if target_language not in LANGUAGE_CODES:
             logger.error(f"Unsupported language: {target_language}")
-            logger.info(f"Supported languages: {', '.join(sorted(LANGUAGE_CODES.keys())[:10])}...")
-            return text  # Return original text if language not supported
-        
-        # Try AI translation if model loaded
+            return text, True  # Fallback: return original text
+
         if self.translator and self.tokenizer:
             try:
                 result = self._translate_with_model(text, target_language)
-                # Cache the result
-                self.translation_cache[cache_key] = result
-                return result
+                self.translation_cache[cache_key] = (result, False)
+                return result, False
             except Exception as e:
                 logger.warning(f"AI translation failed: {e}. Using fallback.")
         
         # Fallback to template translation
         result = f"[Translation to {target_language}]\n\n{text}"
-        self.translation_cache[cache_key] = result
-        return result
+        self.translation_cache[cache_key] = (result, True)
+        return result, True
     
     def _translate_with_model(self, text: str, target_language: str) -> str:
         """Translate using AI model with proper error handling"""
@@ -264,21 +259,25 @@ class Translator:
                 return None
             
             workspace_id, news_id, title, body, summary, image_url, source_url, source_domain = result
-            
+            fallback_occurred = False
+
             # Translate title
             logger.info(f"Translating title to {target_language}...")
-            translated_title = self.translate_text(title, target_language)
-            
+            translated_title, title_fallback = self.translate_text(title, target_language)
+            if title_fallback: fallback_occurred = True
+
             # Translate body
             logger.info(f"Translating body to {target_language}...")
-            translated_body = self.translate_text(body, target_language)
-            
+            translated_body, body_fallback = self.translate_text(body, target_language)
+            if body_fallback: fallback_occurred = True
+
             # Translate summary if present
             translated_summary = ""
             if summary:
                 logger.info(f"Translating summary to {target_language}...")
-                translated_summary = self.translate_text(summary, target_language)
-            
+                translated_summary, summary_fallback = self.translate_text(summary, target_language)
+                if summary_fallback: fallback_occurred = True
+
             # Save as NEW draft in ai_drafts table (so WordPress push works)
             word_count = len(translated_body.split())
             cursor.execute('''
@@ -315,13 +314,14 @@ class Translator:
             
             return {
                 'id': translation_id,
-                'new_draft_id': new_draft_id,  # This is the draft ID to use for WordPress push
+                'new_draft_id': new_draft_id,
                 'original_draft_id': draft_id,
                 'language': target_language,
                 'title': translated_title,
                 'body': translated_body,
                 'summary': translated_summary,
-                'word_count': word_count
+                'word_count': word_count,
+                'fallback_occurred': fallback_occurred
             }
             
         except Exception as e:

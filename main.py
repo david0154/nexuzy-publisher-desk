@@ -1068,6 +1068,18 @@ class NexuzyPublisherApp(tk.Tk):
         
         tk.Label(header_frame, text=f"Translation: {target_lang}", font=('Segoe UI', 16, 'bold'), bg=COLORS['white']).pack(side=tk.LEFT)
 
+        if translation.get('fallback_occurred', False):
+            warning_label = tk.Label(
+                header_frame,
+                text="⚠️ AI model failed. Showing basic template.",
+                font=('Segoe UI', 10, 'bold'),
+                bg=COLORS['warning'],
+                fg=COLORS['white'],
+                padx=8,
+                pady=4
+            )
+            warning_label.pack(side=tk.RIGHT)
+
         title_entry = tk.Entry(view_window, font=('Segoe UI', 12, 'bold'), relief=tk.FLAT, bg=COLORS['light'])
         title_entry.insert(0, translation.get('title', ''))
         title_entry.pack(fill=tk.X, padx=20, pady=5, ipady=4)
