@@ -2,6 +2,7 @@
 Translator Module - NLLB-200 Model Integration with Enhanced Error Handling
 Supports 200+ languages with proper language codes and fallback modes
 Fixed workflow: Save as new draft after translation for WordPress push
+Robust error handling for missing database columns
 """
 
 import sqlite3
@@ -226,6 +227,13 @@ class Translator:
         
         return chunks
     
+    def _check_column_exists(self, conn, table: str, column: str) -> bool:
+        """Check if a column exists in a table"""
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = [col[1] for col in cursor.fetchall()]
+        return column in columns
+    
     def translate_draft(self, draft_id: int, target_language: str) -> Optional[Dict]:
         """
         Translate a draft and save as NEW draft in ai_drafts table
@@ -244,11 +252,32 @@ class Translator:
                 logger.error(f"Invalid target language: {target_language}")
                 return None
             
-            # Get original draft
+            # Get original draft with column checking
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT workspace_id, news_id, title, body_draft, summary, image_url, source_url, source_domain
+            
+            # Check which columns exist
+            has_source_url = self._check_column_exists(conn, 'ai_drafts', 'source_url')
+            has_source_domain = self._check_column_exists(conn, 'ai_drafts', 'source_domain')
+            has_image_url = self._check_column_exists(conn, 'ai_drafts', 'image_url')
+            has_summary = self._check_column_exists(conn, 'ai_drafts', 'summary')
+            
+            # Build dynamic query based on available columns
+            base_cols = 'workspace_id, news_id, title, body_draft'
+            extra_cols = []
+            if has_summary:
+                extra_cols.append('summary')
+            if has_image_url:
+                extra_cols.append('image_url')
+            if has_source_url:
+                extra_cols.append('source_url')
+            if has_source_domain:
+                extra_cols.append('source_domain')
+            
+            query_cols = base_cols + (', ' + ', '.join(extra_cols) if extra_cols else '')
+            
+            cursor.execute(f'''
+                SELECT {query_cols}
                 FROM ai_drafts WHERE id = ?
             ''', (draft_id,))
             result = cursor.fetchone()
@@ -258,7 +287,17 @@ class Translator:
                 conn.close()
                 return None
             
-            workspace_id, news_id, title, body, summary, image_url, source_url, source_domain = result
+            # Unpack results dynamically
+            workspace_id, news_id, title, body = result[:4]
+            idx = 4
+            summary = result[idx] if has_summary and len(result) > idx else ''
+            idx += 1 if has_summary else 0
+            image_url = result[idx] if has_image_url and len(result) > idx else ''
+            idx += 1 if has_image_url else 0
+            source_url = result[idx] if has_source_url and len(result) > idx else ''
+            idx += 1 if has_source_url else 0
+            source_domain = result[idx] if has_source_domain and len(result) > idx else ''
+            
             fallback_occurred = False
 
             # Translate title
@@ -280,22 +319,29 @@ class Translator:
 
             # Save as NEW draft in ai_drafts table (so WordPress push works)
             word_count = len(translated_body.split())
-            cursor.execute('''
-                INSERT INTO ai_drafts 
-                (workspace_id, news_id, title, body_draft, summary, word_count, image_url, source_url, source_domain, is_html, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-            ''', (
-                workspace_id,
-                news_id,
-                f"{translated_title} [{target_language}]",  # Add language tag
-                translated_body,
-                translated_summary,
-                word_count,
-                image_url or '',
-                source_url or '',
-                source_domain or '',
-                datetime.now().isoformat()
-            ))
+            
+            # Build insert query dynamically based on available columns
+            insert_cols = ['workspace_id', 'news_id', 'title', 'body_draft', 'word_count', 'is_html', 'created_at']
+            insert_vals = [workspace_id, news_id, f"{translated_title} [{target_language}]", translated_body, word_count, 1, datetime.now().isoformat()]
+            
+            if has_summary:
+                insert_cols.append('summary')
+                insert_vals.append(translated_summary)
+            if has_image_url:
+                insert_cols.append('image_url')
+                insert_vals.append(image_url or '')
+            if has_source_url:
+                insert_cols.append('source_url')
+                insert_vals.append(source_url or '')
+            if has_source_domain:
+                insert_cols.append('source_domain')
+                insert_vals.append(source_domain or '')
+            
+            placeholders = ', '.join(['?' for _ in insert_vals])
+            cursor.execute(f'''
+                INSERT INTO ai_drafts ({', '.join(insert_cols)})
+                VALUES ({placeholders})
+            ''', insert_vals)
             
             new_draft_id = cursor.lastrowid
             
@@ -324,8 +370,18 @@ class Translator:
                 'fallback_occurred': fallback_occurred
             }
             
+        except sqlite3.OperationalError as e:
+            if "no such column" in str(e):
+                logger.error(f"❌ Database schema error: {e}")
+                logger.error("❌ Please run: python fix_database.py")
+                logger.error("This will add missing columns to your database.")
+            else:
+                logger.error(f"❌ Database error: {e}")
+            return None
         except Exception as e:
             logger.error(f"❌ Error translating draft: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def batch_translate(self, draft_ids: List[int], target_languages: List[str]) -> List[Dict]:
