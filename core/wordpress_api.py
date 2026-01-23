@@ -1,17 +1,16 @@
 # Update wordpress_api.py with enhanced image handling from local files
 # Key changes:
-# 1. Add upload_image_from_local_file method
-# 2. Update publish_draft to handle local image paths
-# 3. Ensure no external image links in posts
+# 1. Add download_and_cache_image to handle image URLs
+# 2. Update publish_draft to use the new image handler
+# 3. Improve connection test to be more reliable
 
 import requests
 import sqlite3
 import logging
-from typing import Dict, List, Optional
-from datetime import datetime
-import base64
-import time
+from typing import Dict, Optional
 from pathlib import Path
+import tempfile
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +55,58 @@ class WordPressAPI:
         except Exception as e:
             logger.error(f"Failed to initialize WordPress connection: {e}")
             return False
+
+    def download_and_cache_image(self, image_url: str) -> Optional[str]:
+        """
+        Download an image from a URL and save it to a local cache.
+
+        Args:
+            image_url: The URL of the image to download.
+
+        Returns:
+            The local file path of the downloaded image, or None if failed.
+        """
+        if not image_url or not image_url.startswith('http'):
+            logger.warning(f"Invalid or empty image URL provided: {image_url}")
+            return None
+
+        try:
+            # Create a temporary directory for images if it doesn't exist
+            cache_dir = Path(tempfile.gettempdir()) / "nexuzy_images"
+            cache_dir.mkdir(exist_ok=True)
+
+            # Generate a filename based on the URL hash to avoid duplicates
+            file_hash = hashlib.md5(image_url.encode()).hexdigest()
+            try:
+                file_ext = Path(image_url.split('?')[0]).suffix
+                if not file_ext or len(file_ext) > 5: # Basic check for valid extension
+                    file_ext = '.jpg'
+            except Exception:
+                file_ext = '.jpg'
+
+            local_path = cache_dir / (file_hash + file_ext)
+
+            if local_path.exists():
+                logger.info(f"Image already cached: {local_path}")
+                return str(local_path)
+
+            logger.info(f"Downloading image from {image_url} to {local_path}")
+            response = requests.get(image_url, stream=True, timeout=30)
+            response.raise_for_status()
+
+            with open(local_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            logger.info("✅ Image downloaded successfully.")
+            return str(local_path)
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download image from URL {image_url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"An error occurred while caching the image: {e}")
+            return None
     
     def upload_image_from_local_file(self, local_path: str) -> Optional[int]:
         """
@@ -122,7 +173,7 @@ class WordPressAPI:
     def publish_draft(self, draft_id: int, workspace_id: int) -> Optional[Dict]:
         """
         Publish draft to WordPress with proper image handling
-        Images are uploaded from local storage, not linked externally
+        Downloads image from URL, saves locally, then uploads
         
         Args:
             draft_id: Draft ID from ai_drafts table
@@ -152,16 +203,19 @@ class WordPressAPI:
                 logger.error(f"Draft {draft_id} not found")
                 return None
             
-            title, content, summary, image_path, source_url = result
+            title, content, summary, image_url, source_url = result
             
-            # Upload featured image from local file (NOT from URL)
+            # Download image from URL and then upload from local file
             featured_media_id = None
-            if image_path:
-                logger.info(f"Uploading featured image from local storage: {image_path}")
-                featured_media_id = self.upload_image_from_local_file(image_path)
+            if image_url:
+                logger.info(f"Processing featured image from URL: {image_url}")
+                local_image_path = self.download_and_cache_image(image_url)
+
+                if local_image_path:
+                    featured_media_id = self.upload_image_from_local_file(local_image_path)
                 
                 if not featured_media_id:
-                    logger.warning("Featured image upload failed, continuing without image")
+                    logger.warning("Featured image processing failed, continuing without image")
             
             # Create WordPress post
             post_data = {
@@ -204,13 +258,36 @@ class WordPressAPI:
             return None
     
     def test_connection(self, site_url: str, username: str, password: str) -> bool:
-        """Test WordPress connection"""
+        """
+        Test WordPress connection by accessing a protected endpoint.
+
+        This method is more reliable as it verifies authentication,
+        not just reachability.
+        """
         try:
-            base_url = site_url.rstrip('/') + '/wp-json/wp/v2'
+            # Endpoint for fetching the current user's details, requires authentication
+            test_url = site_url.rstrip('/') + '/wp-json/wp/v2/users/me'
+
+            logger.info(f"Testing WordPress connection to {test_url}")
+
             session = requests.Session()
             session.auth = (username, password)
+            session.headers.update({'User-Agent': 'Nexuzy-Publisher-Test/2.0'})
             
-            response = session.get(base_url, timeout=10)
-            return response.status_code == 200
-        except:
+            # A timeout is crucial for network requests
+            response = session.get(test_url, timeout=15)
+
+            # Check for a successful status code
+            if response.status_code == 200:
+                logger.info("✅ WordPress connection test successful.")
+                return True
+            else:
+                logger.warning(f"WordPress connection test failed with status code: {response.status_code}")
+                logger.warning(f"Response: {response.text}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error during WordPress connection test: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during connection test: {e}")
             return False
