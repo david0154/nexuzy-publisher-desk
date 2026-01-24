@@ -1,8 +1,7 @@
-# Update wordpress_api.py with enhanced image handling from local files
-# Key changes:
-# 1. Add download_and_cache_image to handle image URLs
-# 2. Update publish_draft to use the new image handler
-# 3. Improve connection test to be more reliable
+"""
+WordPress API Module - Fixed Image Upload and Error Handling
+Fixes for image upload format and JSON parsing errors
+"""
 
 import requests
 import sqlite3
@@ -111,7 +110,7 @@ class WordPressAPI:
     def upload_image_from_local_file(self, local_path: str) -> Optional[int]:
         """
         Upload image directly from local file system to WordPress
-        No external image URLs - direct upload to WP media library
+        FIXED: Uses multipart/form-data format instead of raw bytes
         
         Args:
             local_path: Path to local image file
@@ -125,10 +124,6 @@ class WordPressAPI:
                 logger.error(f"Local image file not found: {local_path}")
                 return None
             
-            # Read image file
-            with open(path, 'rb') as f:
-                image_data = f.read()
-            
             # Determine content type
             ext = path.suffix.lower()
             content_types = {
@@ -140,40 +135,55 @@ class WordPressAPI:
             }
             content_type = content_types.get(ext, 'image/jpeg')
             
-            # Prepare upload
-            headers = {
-                'Content-Disposition': f'attachment; filename="{path.name}"',
-                'Content-Type': content_type
-            }
-            
             logger.info(f"Uploading image from local file: {path.name}")
             
-            # Upload to WordPress
-            response = self.session.post(
-                self.media_url,
-                data=image_data,
-                headers=headers,
-                timeout=60
-            )
+            # FIXED: Use multipart/form-data format (files parameter)
+            with open(path, 'rb') as f:
+                files = {
+                    'file': (path.name, f, content_type)
+                }
+                
+                # Upload to WordPress
+                response = self.session.post(
+                    self.media_url,
+                    files=files,
+                    timeout=60
+                )
             
-            if response.status_code in (200, 201):
+            # FIXED: Validate response before JSON parsing
+            if not response.ok:
+                logger.error(f"Image upload failed: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
+                return None
+            
+            # FIXED: Safe JSON parsing with error handling
+            try:
                 media_data = response.json()
                 media_id = media_data.get('id')
+                
+                if not media_id:
+                    logger.error("No media ID in response")
+                    logger.error(f"Response: {media_data}")
+                    return None
+                
                 logger.info(f"✅ Image uploaded to WordPress Media Library. Media ID: {media_id}")
                 return media_id
-            else:
-                logger.error(f"Image upload failed: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text}")
+            
+            except ValueError as e:
+                logger.error(f"JSON parsing error: {e}")
+                logger.error(f"Response text: {response.text[:500]}")
                 return None
         
         except Exception as e:
             logger.error(f"Error uploading local image: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def publish_draft(self, draft_id: int, workspace_id: int) -> Optional[Dict]:
         """
         Publish draft to WordPress with proper image handling
-        Downloads image from URL, saves locally, then uploads
+        FIXED: Enhanced error handling and response validation
         
         Args:
             draft_id: Draft ID from ai_drafts table
@@ -236,10 +246,22 @@ class WordPressAPI:
                 timeout=60
             )
             
-            if response.status_code in (200, 201):
+            # FIXED: Validate response before JSON parsing
+            if not response.ok:
+                logger.error(f"Post creation failed: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
+                return None
+            
+            # FIXED: Safe JSON parsing
+            try:
                 post = response.json()
                 post_id = post.get('id')
                 post_url = post.get('link')
+                
+                if not post_id:
+                    logger.error("No post ID in response")
+                    logger.error(f"Response: {post}")
+                    return None
                 
                 logger.info(f"✅ Post created successfully: {post_url}")
                 
@@ -248,13 +270,16 @@ class WordPressAPI:
                     'url': post_url,
                     'status': 'draft'
                 }
-            else:
-                logger.error(f"Post creation failed: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text}")
+            
+            except ValueError as e:
+                logger.error(f"JSON parsing error: {e}")
+                logger.error(f"Response text: {response.text[:500]}")
                 return None
         
         except Exception as e:
             logger.error(f"Error publishing to WordPress: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def test_connection(self, site_url: str, username: str, password: str) -> bool:
@@ -283,7 +308,7 @@ class WordPressAPI:
                 return True
             else:
                 logger.warning(f"WordPress connection test failed with status code: {response.status_code}")
-                logger.warning(f"Response: {response.text}")
+                logger.warning(f"Response: {response.text[:500]}")
                 return False
         except requests.exceptions.RequestException as e:
             logger.error(f"Error during WordPress connection test: {e}")
