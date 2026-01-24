@@ -465,6 +465,15 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
         logger.info("✅ Removed unwanted sections (conclusions, risks, etc.)")
         return cleaned
     
+    def _check_column_exists(self, cursor, table: str, column: str) -> bool:
+        """Check if a column exists in a table"""
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [col[1] for col in cursor.fetchall()]
+            return column in columns
+        except Exception:
+            return False
+
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
         """Store draft in database with HTML format and local image path"""
         try:
@@ -479,11 +488,9 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
                 html_body = image_html + html_body
             
-            cursor.execute('''
-                INSERT INTO ai_drafts 
-                (workspace_id, news_id, title, body_draft, summary, word_count, image_url, source_url, source_domain, is_html, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
+            # Dynamic Insert based on available columns
+            columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
+            values = [
                 workspace_id,
                 news_id,
                 draft.get('title', ''),
@@ -492,10 +499,26 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 draft.get('word_count', 0),
                 draft.get('local_image_path', ''),  # Store local path
                 draft.get('source_url', ''),
-                draft.get('source_domain', ''),
-                1,
                 datetime.now().isoformat()
-            ))
+            ]
+
+            # Optional columns that might not exist yet if migration failed
+            if self._check_column_exists(cursor, 'ai_drafts', 'source_domain'):
+                columns.append('source_domain')
+                values.append(draft.get('source_domain', ''))
+            
+            if self._check_column_exists(cursor, 'ai_drafts', 'is_html'):
+                columns.append('is_html')
+                values.append(1)
+
+            placeholders = ', '.join(['?' for _ in values])
+            column_names = ', '.join(columns)
+            
+            cursor.execute(f'''
+                INSERT INTO ai_drafts 
+                ({column_names})
+                VALUES ({placeholders})
+            ''', values)
             
             conn.commit()
             draft_id = cursor.lastrowid
