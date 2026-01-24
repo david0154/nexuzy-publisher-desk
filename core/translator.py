@@ -321,8 +321,9 @@ class Translator:
             word_count = len(translated_body.split())
             
             # Build insert query dynamically based on available columns
-            insert_cols = ['workspace_id', 'news_id', 'title', 'body_draft', 'word_count', 'is_html', 'created_at']
-            insert_vals = [workspace_id, news_id, f"{translated_title} [{target_language}]", translated_body, word_count, 1, datetime.now().isoformat()]
+            # Using 'generated_at' as per original schema
+            insert_cols = ['workspace_id', 'news_id', 'title', 'body_draft', 'word_count', 'generated_at']
+            insert_vals = [workspace_id, news_id, f"{translated_title} [{target_language}]", translated_body, word_count, datetime.now().isoformat()]
             
             if has_summary:
                 insert_cols.append('summary')
@@ -336,6 +337,9 @@ class Translator:
             if has_source_domain:
                 insert_cols.append('source_domain')
                 insert_vals.append(source_domain or '')
+            if self._check_column_exists(conn, 'ai_drafts', 'is_html'):
+                 insert_cols.append('is_html')
+                 insert_vals.append(1)
             
             placeholders = ', '.join(['?' for _ in insert_vals])
             cursor.execute(f'''
@@ -346,11 +350,22 @@ class Translator:
             new_draft_id = cursor.lastrowid
             
             # Also save in translations table for record keeping
-            cursor.execute('''
+            # Check if summary column exists in translations
+            has_trans_summary = self._check_column_exists(conn, 'translations', 'summary')
+            
+            trans_cols = ['draft_id', 'language', 'title', 'body', 'approved', 'translated_at']
+            trans_vals = [draft_id, target_language, translated_title, translated_body, 0, datetime.now().isoformat()]
+            
+            if has_trans_summary:
+                trans_cols.append('summary')
+                trans_vals.append(translated_summary)
+            
+            placeholders = ', '.join(['?' for _ in trans_vals])
+            cursor.execute(f'''
                 INSERT INTO translations
-                (draft_id, language, title, body, summary, approved, translated_at)
-                VALUES (?, ?, ?, ?, ?, 0, ?)
-            ''', (draft_id, target_language, translated_title, translated_body, translated_summary, datetime.now().isoformat()))
+                ({', '.join(trans_cols)})
+                VALUES ({placeholders})
+            ''', trans_vals)
             
             translation_id = cursor.lastrowid
             conn.commit()
@@ -402,8 +417,14 @@ class Translator:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, language, title, body, summary, approved, translated_at
+            
+            # Check if summary exists
+            has_summary = self._check_column_exists(conn, 'translations', 'summary')
+            
+            summary_col = 'summary, ' if has_summary else ''
+            
+            cursor.execute(f'''
+                SELECT id, language, title, body, {summary_col} approved, translated_at
                 FROM translations
                 WHERE draft_id = ?
                 ORDER BY translated_at DESC
