@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 import json
 import requests
 from io import BytesIO
+import os
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -29,38 +31,43 @@ class DraftGenerator:
         # Initialize sentence improvement model (lighter weight for quick improvements)
         self.sentence_model = self._load_sentence_model()
         
-        # Model status - NO TEMPLATE MODE
+        # Model status
         if not self.llm:
-            logger.error("❌ AI Writer NOT LOADED - Download model required!")
+            logger.warning("⚠️  AI Writer in SAFE MODE - Using template-based generation")
+            logger.warning("📥 Download GGUF model for full AI features")
         else:
-            logger.info("✅ AI Writer LOADED - Ready to generate")
+            logger.info("✅ AI Writer LOADED - Full AI generation enabled")
     
     def _load_model(self):
-        """Load GGUF quantized Mistral model - NO FALLBACK TO TEMPLATE MODE"""
+        """Load GGUF quantized Mistral model with safe fallback"""
         try:
             from ctransformers import AutoModelForCausalLM
             
             logger.info(f"Loading GGUF model: {self.model_name}")
             
-            # Check multiple possible paths
+            # Check multiple possible paths (cross-platform compatible)
+            model_name_safe = self.model_name.replace('/', '_')
             possible_paths = [
-                Path('models') / self.model_name.replace('/', '_') / self.model_file,
+                Path('models') / model_name_safe / self.model_file,
                 Path('models') / self.model_file,
-                Path(self.model_file)
+                Path(self.model_file),
+                Path.home() / '.cache' / 'nexuzy' / 'models' / model_name_safe / self.model_file
             ]
             
             model_path = None
             for path in possible_paths:
                 if path.exists():
                     model_path = path
+                    logger.info(f"Found model at: {model_path}")
                     break
             
             if not model_path:
-                logger.error(f"❌ GGUF model not found. Checked paths:")
+                logger.warning(f"⚠️  GGUF model not found. Checked paths:")
                 for p in possible_paths:
-                    logger.error(f"  - {p}")
-                logger.error("📥 Download model: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
-                logger.error("⚠️  AI Writer will NOT work without model - NO TEMPLATE MODE")
+                    logger.warning(f"  - {p}")
+                logger.warning("📥 Download from: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/blob/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf")
+                logger.warning("💡 Place in: models/ folder")
+                logger.warning("✅ App continues in SAFE MODE with template generation")
                 return None
             
             logger.info(f"Loading GGUF model from: {model_path}")
@@ -71,7 +78,7 @@ class DraftGenerator:
                 model_type='mistral',
                 context_length=4096,
                 max_new_tokens=1500,
-                threads=4,
+                threads=min(4, os.cpu_count() or 4),  # Auto-detect CPU cores
                 gpu_layers=0
             )
             
@@ -79,12 +86,12 @@ class DraftGenerator:
             return llm
         
         except ImportError:
-            logger.error("❌ ctransformers not installed. Install: pip install ctransformers")
-            logger.error("⚠️  AI Writer requires ctransformers - NO TEMPLATE MODE")
+            logger.warning("⚠️  ctransformers not installed. Install: pip install ctransformers")
+            logger.warning("✅ App continues in SAFE MODE with template generation")
             return None
         except Exception as e:
-            logger.error(f"❌ Error loading GGUF model: {e}")
-            logger.error("⚠️  AI Writer will NOT work - NO TEMPLATE MODE")
+            logger.warning(f"⚠️  Error loading GGUF model: {e}")
+            logger.warning("✅ App continues in SAFE MODE with template generation")
             return None
     
     def _load_sentence_model(self):
@@ -258,8 +265,8 @@ class DraftGenerator:
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
         """
-        Generate complete article draft with AI or manual content enhancement
-        NO TEMPLATE MODE - AI model required
+        Generate complete article draft with AI or template-based fallback
+        SAFE MODE: Falls back to template generation if model unavailable
         """
         try:
             # Get news details
@@ -296,14 +303,9 @@ class DraftGenerator:
             elif self.llm:
                 draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             else:
-                logger.error("❌ AI model not loaded! Cannot generate draft without model.")
-                return {
-                    'title': headline,
-                    'body_draft': '❌ ERROR: AI Writer model not loaded.\n\n📥 Please download the Mistral-7B-GGUF model first.\n\nDownload from: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF\n\nPlace in: models/ folder\n\n⚠️  NO TEMPLATE MODE - AI model is required for article generation.',
-                    'summary': summary or '',
-                    'word_count': 0,
-                    'error': 'Model not loaded - NO TEMPLATE MODE'
-                }
+                # SAFE MODE: Template-based generation
+                logger.info("Using template-based generation (SAFE MODE)")
+                draft = self._generate_template_based(headline, summary, category, topic_info)
             
             # Embed image properly in article (local path, not URL)
             draft['image_url'] = image_url or ''
@@ -321,6 +323,60 @@ class DraftGenerator:
         except Exception as e:
             logger.error(f"❌ Error generating draft: {e}")
             return {}
+    
+    def _generate_template_based(self, headline: str, summary: str, category: str, topic_info: Dict) -> Dict:
+        """
+        Template-based draft generation for SAFE MODE
+        Creates professional articles without requiring AI model
+        """
+        logger.info("Generating template-based article (SAFE MODE)")
+        
+        # Extract key information
+        capitalized = topic_info.get('capitalized_terms', [])
+        numbers = topic_info.get('numbers', [])
+        focus = topic_info.get('focus', category)
+        
+        # Build article sections
+        sections = []
+        
+        # Introduction
+        intro = f"<h2>Introduction</h2>\n<p>{headline} - This {category.lower()} development has gained significant attention. "
+        if summary:
+            intro += f"{summary[:200]}..."
+        intro += "</p>"
+        sections.append(intro)
+        
+        # Background
+        background = f"<h2>Background</h2>\n<p>This story relates to recent developments in {focus}. "
+        if capitalized:
+            background += f"Key entities involved include {', '.join(capitalized[:3])}. "
+        if numbers:
+            background += f"Notable figures mentioned include {', '.join(numbers[:3])}."
+        background += "</p>"
+        sections.append(background)
+        
+        # Main Content
+        main = f"<h2>Key Details</h2>\n<p>{summary or 'This development represents a significant event in the ' + category.lower() + ' sector.'}</p>"
+        sections.append(main)
+        
+        # Analysis
+        analysis = f"<h2>Analysis</h2>\n<p>Industry experts are closely monitoring this situation. "
+        analysis += f"The implications for {focus} remain to be fully understood as more information becomes available.</p>"
+        sections.append(analysis)
+        
+        # Note about template generation
+        template_note = "\n<p><em>Note: This article was generated using template-based content generation. For full AI-powered drafts, download the Mistral-7B GGUF model.</em></p>"
+        
+        body = "\n\n".join(sections) + template_note
+        
+        return {
+            'title': headline,
+            'body_draft': body,
+            'summary': summary or '',
+            'word_count': len(body.split()),
+            'is_template_generated': True,
+            'generation_mode': 'template'
+        }
     
     def _enhance_manual_content(self, content: str, headline: str, category: str, topic_info: Dict) -> Dict:
         """Enhance user-written content with AI sentence improvement"""
@@ -376,7 +432,7 @@ class DraftGenerator:
         return " ".join(enhanced_sentences)
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate with real AI model - NO CONCLUSIONS OR RISKS"""
+        """Generate with real AI model"""
         
         topic_context = f"""Topic Focus: {topic_info['focus']}
 Category: {category}
@@ -420,24 +476,16 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 'body_draft': cleaned_text.strip(),
                 'summary': summary,
                 'word_count': len(cleaned_text.split()),
-                'is_ai_generated': True
+                'is_ai_generated': True,
+                'generation_mode': 'ai_model'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
-            return {
-                'title': headline,
-                'body_draft': f'❌ ERROR: {str(e)}',
-                'summary': summary,
-                'word_count': 0,
-                'error': str(e)
-            }
+            logger.info("Falling back to template generation")
+            return self._generate_template_based(headline, summary, category, topic_info)
     
     def _remove_unwanted_sections(self, text: str) -> str:
-        """
-        Remove conclusion, risk assessment, summary, and other unwanted sections
-        This is CRITICAL - removes all extra sections user doesn't want
-        """
-        # Patterns to remove - comprehensive list
+        """Remove conclusion, risk assessment, summary sections"""
         unwanted_patterns = [
             r'## Conclusion.*$',
             r'## Risk.*$',
@@ -459,10 +507,8 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
         for pattern in unwanted_patterns:
             cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.IGNORECASE)
         
-        # Remove trailing empty lines
         cleaned = cleaned.strip()
-        
-        logger.info("✅ Removed unwanted sections (conclusions, risks, etc.)")
+        logger.info("✅ Removed unwanted sections")
         return cleaned
     
     def _check_column_exists(self, cursor, table: str, column: str) -> bool:
@@ -475,7 +521,7 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             return False
 
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
-        """Store draft in database with HTML format and local image path"""
+        """Store draft in database with HTML format"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -488,7 +534,7 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
                 html_body = image_html + html_body
             
-            # Dynamic Insert based on available columns
+            # Dynamic Insert
             columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
             values = [
                 workspace_id,
@@ -497,12 +543,12 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 html_body,
                 draft.get('summary', ''),
                 draft.get('word_count', 0),
-                draft.get('local_image_path', ''),  # Store local path
+                draft.get('local_image_path', ''),
                 draft.get('source_url', ''),
                 datetime.now().isoformat()
             ]
 
-            # Optional columns that might not exist yet if migration failed
+            # Optional columns
             if self._check_column_exists(cursor, 'ai_drafts', 'source_domain'):
                 columns.append('source_domain')
                 values.append(draft.get('source_domain', ''))
@@ -510,6 +556,10 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             if self._check_column_exists(cursor, 'ai_drafts', 'is_html'):
                 columns.append('is_html')
                 values.append(1)
+            
+            if self._check_column_exists(cursor, 'ai_drafts', 'generation_mode'):
+                columns.append('generation_mode')
+                values.append(draft.get('generation_mode', 'unknown'))
 
             placeholders = ', '.join(['?' for _ in values])
             column_names = ', '.join(columns)
