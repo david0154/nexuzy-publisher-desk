@@ -1,1 +1,524 @@
-"""\nVision AI Module - Image Analysis with Watermark Detection\nVerifies images, detects watermarks, optimizes for web publishing\n"""\n\nimport sqlite3\nimport logging\nfrom typing import Dict, List, Optional, Tuple\nimport hashlib\nfrom datetime import datetime\nimport base64\nimport io\nfrom pathlib import Path\n\nlogger = logging.getLogger(__name__)\n\nclass VisionAI:\n    """Analyze images using Vision AI with watermark detection"""\n    \n    def __init__(self, db_path: str = 'nexuzy.db'):\n        self.db_path = db_path\n        self.vision_model = self._load_vision_model()\n        self.image_cache = {}  # Cache analyzed images\n    \n    def _load_vision_model(self):\n        """Load Vision AI model for image analysis - GRACEFUL FALLBACK"""\n        try:\n            from transformers import AutoImageProcessor, AutoModelForImageClassification\n            from PIL import Image\n            import torch\n            \n            logger.info("Loading Vision AI model...")\n            \n            # Try to load a lightweight vision model\n            try:\n                processor = AutoImageProcessor.from_pretrained(\n                    "google/vit-base-patch16-224",\n                    trust_remote_code=True\n                )\n                model = AutoModelForImageClassification.from_pretrained(\n                    "google/vit-base-patch16-224",\n                    trust_remote_code=True,\n                    device_map="cpu"\n                )\n                logger.info("✅ Vision AI model loaded successfully")\n                return {'processor': processor, 'model': model}\n            except Exception as e:\n                logger.warning(f"⚠️  Could not load vision model: {e}")\n                logger.info("✅ Will use heuristic image analysis (no model required)")\n                return None\n        \n        except ImportError as e:\n            logger.warning(f"⚠️  Vision AI dependencies not installed: {e}")\n            logger.info("💡 Install (optional): pip install transformers pillow torch")\n            logger.info("✅ App will work with heuristic image analysis")\n            return None\n        except Exception as e:\n            logger.error(f"Error loading Vision AI: {e}")\n            return None\n    \n    def analyze_image(self, image_path: str, draft_id: int) -> Dict:\n        """\n        Comprehensive image analysis including watermark detection\n        \n        Args:\n            image_path: Path to image file or URL\n            draft_id: Associated draft ID\n        \n        Returns:\n            Analysis results dictionary\n        """\n        try:\n            logger.info(f"Analyzing image: {image_path}")\n            \n            # Load image\n            image_data = self._load_image(image_path)\n            if not image_data:\n                return {'status': 'failed', 'error': 'Could not load image'}\n            \n            # Generate image hash for duplicate detection\n            image_hash = self._generate_image_hash(image_data['path'])\n            \n            # Check for duplicates\n            duplicate_check = self._check_duplicate_image(image_hash)\n            if duplicate_check['is_duplicate']:\n                logger.warning(f"Duplicate image detected: {duplicate_check['original_id']}")\n            \n            # Detect watermarks\n            watermark_result = self._detect_watermark(image_data['path'])\n            \n            # Extract image metadata\n            metadata = self._extract_metadata(image_data['path'])\n            \n            # Assess image quality\n            quality_score = self._assess_image_quality(image_data['path'])\n            \n            # Optimize image\n            optimized_path = self._optimize_image(image_data['path'])\n            \n            # Convert to base64 for direct embedding\n            image_base64 = self._convert_to_base64(optimized_path or image_data['path'])\n            \n            # Compile analysis results\n            analysis = {\n                'status': 'success',\n                'image_path': image_path,\n                'image_hash': image_hash,\n                'watermark_detected': watermark_result['has_watermark'],\n                'watermark_confidence': watermark_result['confidence'],\n                'watermark_type': watermark_result['type'],\n                'quality_score': quality_score,\n                'metadata': metadata,\n                'duplicate_detected': duplicate_check['is_duplicate'],\n                'image_base64': image_base64,\n                'optimized_size': len(image_base64),\n                'recommendations': self._generate_recommendations(watermark_result, quality_score),\n                'notifications': self._generate_notifications(watermark_result, duplicate_check, quality_score)\n            }\n            \n            # Store analysis in database\n            self._store_analysis(draft_id, analysis)\n            \n            return analysis\n        \n        except Exception as e:\n            logger.error(f"Error analyzing image: {e}")\n            return {'status': 'failed', 'error': str(e)}\n    \n    def _load_image(self, image_path: str) -> Optional[Dict]:\n        """Load image from file or URL"""\n        try:\n            from PIL import Image\n            import requests\n            from io import BytesIO\n            \n            if image_path.startswith('http'):\n                # Load from URL\n                response = requests.get(image_path, timeout=10)\n                image = Image.open(BytesIO(response.content))\n                temp_path = f"/tmp/image_{hashlib.md5(image_path.encode()).hexdigest()}.png"\n                image.save(temp_path)\n            else:\n                # Load from file\n                image = Image.open(image_path)\n                temp_path = image_path\n            \n            return {\n                'path': temp_path,\n                'image': image,\n                'format': image.format,\n                'size': image.size\n            }\n        except Exception as e:\n            logger.error(f"Error loading image: {e}")\n            return None\n    \n    def _detect_watermark(self, image_path: str) -> Dict:\n        """\n        Detect watermarks in image using multiple techniques\n        """\n        try:\n            from PIL import Image\n            import numpy as np\n            \n            image = Image.open(image_path).convert('RGB')\n            img_array = np.array(image)\n            \n            # Check for text watermarks\n            text_watermark = self._detect_text_watermark(img_array)\n            \n            # Check for logo watermarks\n            logo_watermark = self._detect_logo_watermark(img_array)\n            \n            # Check for gradient watermarks\n            gradient_watermark = self._detect_gradient_watermark(img_array)\n            \n            # Compile results\n            has_watermark = any([text_watermark['detected'], logo_watermark['detected'], gradient_watermark['detected']])\n            \n            confidence = max([text_watermark['confidence'], logo_watermark['confidence'], gradient_watermark['confidence']])\n            \n            watermark_type = []\n            if text_watermark['detected']:\n                watermark_type.append('text')\n            if logo_watermark['detected']:\n                watermark_type.append('logo')\n            if gradient_watermark['detected']:\n                watermark_type.append('gradient')\n            \n            logger.info(f"Watermark detection: {has_watermark} (confidence: {confidence})")\n            \n            return {\n                'has_watermark': has_watermark,\n                'confidence': confidence,\n                'type': ', '.join(watermark_type) if watermark_type else 'none',\n                'details': {\n                    'text': text_watermark,\n                    'logo': logo_watermark,\n                    'gradient': gradient_watermark\n                }\n            }\n        \n        except Exception as e:\n            logger.error(f"Error detecting watermark: {e}")\n            return {\n                'has_watermark': False,\n                'confidence': 0,\n                'type': 'unknown',\n                'error': str(e)\n            }\n    \n    def _detect_text_watermark(self, img_array) -> Dict:\n        """Detect text-based watermarks"""\n        try:\n            import numpy as np\n            \n            # Convert to grayscale for text detection\n            gray = np.mean(img_array, axis=2)\n            \n            # Calculate edge density (text has high edges)\n            edges = np.abs(np.diff(gray))\n            edge_density = np.mean(edges)\n            \n            # Threshold-based detection\n            text_detected = edge_density > 15  # Adjust threshold based on testing\n            confidence = min(edge_density / 50, 1.0)  # Normalize to 0-1\n            \n            return {\n                'detected': text_detected,\n                'confidence': float(confidence),\n                'edge_density': float(edge_density)\n            }\n        except Exception as e:\n            logger.debug(f"Error in text watermark detection: {e}")\n            return {'detected': False, 'confidence': 0}\n    \n    def _detect_logo_watermark(self, img_array) -> Dict:\n        """Detect logo-based watermarks in corners"""\n        try:\n            import numpy as np\n            \n            height, width, _ = img_array.shape\n            \n            # Check corners where logos typically appear\n            corner_size = min(height // 4, width // 4)\n            corners = [\n                img_array[:corner_size, :corner_size],  # Top-left\n                img_array[:corner_size, -corner_size:],  # Top-right\n                img_array[-corner_size:, :corner_size],  # Bottom-left\n                img_array[-corner_size:, -corner_size:]   # Bottom-right\n            ]\n            \n            # Calculate color variance in corners\n            corner_variances = [np.var(corner) for corner in corners]\n            avg_corner_variance = np.mean(corner_variances)\n            \n            # High variance suggests distinct logo\n            logo_detected = avg_corner_variance > 500  # Adjust threshold\n            confidence = min(avg_corner_variance / 2000, 1.0)\n            \n            return {\n                'detected': logo_detected,\n                'confidence': float(confidence),\n                'variance': float(avg_corner_variance)\n            }\n        except Exception as e:\n            logger.debug(f"Error in logo watermark detection: {e}")\n            return {'detected': False, 'confidence': 0}\n    \n    def _detect_gradient_watermark(self, img_array) -> Dict:\n        """Detect gradient or overlay watermarks"""\n        try:\n            import numpy as np\n            \n            # Check for semi-transparent overlays\n            # Analyze color distribution\n            color_std = np.std(img_array, axis=(0, 1))\n            avg_color_std = np.mean(color_std)\n            \n            # Low color std suggests overlay\n            overlay_detected = avg_color_std < 30  # Adjust threshold\n            confidence = (50 - avg_color_std) / 50 if avg_color_std < 50 else 0\n            confidence = max(0, min(confidence, 1.0))\n            \n            return {\n                'detected': overlay_detected,\n                'confidence': float(confidence),\n                'color_variance': float(avg_color_std)\n            }\n        except Exception as e:\n            logger.debug(f"Error in gradient watermark detection: {e}")\n            return {'detected': False, 'confidence': 0}\n    \n    def _extract_metadata(self, image_path: str) -> Dict:\n        """Extract EXIF and other metadata"""\n        try:\n            from PIL import Image\n            from PIL.ExifTags import TAGS\n            \n            image = Image.open(image_path)\n            metadata = {\n                'format': image.format,\n                'size': image.size,\n                'width': image.width,\n                'height': image.height,\n                'mode': image.mode,\n                'exif_data': {}\n            }\n            \n            # Extract EXIF data if available\n            try:\n                exif_data = image.getexif()\n                for tag_id, value in exif_data.items():\n                    tag_name = TAGS.get(tag_id, tag_id)\n                    metadata['exif_data'][tag_name] = str(value)[:100]  # Limit to 100 chars\n            except:\n                pass\n            \n            return metadata\n        except Exception as e:\n            logger.error(f"Error extracting metadata: {e}")\n            return {}\n    \n    def _assess_image_quality(self, image_path: str) -> float:\n        """Assess overall image quality (0-1 scale)"""\n        try:\n            from PIL import Image\n            import numpy as np\n            \n            image = Image.open(image_path)\n            img_array = np.array(image)\n            \n            # Check dimensions\n            min_dimension = min(image.width, image.height)\n            size_score = min(min_dimension / 1920, 1.0)  # Good quality if > 1920px\n            \n            # Check color depth\n            if image.mode == 'RGB':\n                color_score = 1.0\n            elif image.mode == 'RGBA':\n                color_score = 0.9\n            else:\n                color_score = 0.7\n            \n            # Check blur (using Laplacian variance)\n            if image.mode != 'RGB':\n                img_array = Image.new('RGB', image.size, color=image.getexif().get(274, 1))\n            \n            # Simple blur detection\n            gray = np.mean(img_array, axis=2) if len(img_array.shape) == 3 else img_array\n            edges = np.abs(np.diff(gray))\n            blur_score = min(np.mean(edges) / 20, 1.0)\n            \n            # Combined quality score\n            quality = (size_score * 0.3 + color_score * 0.3 + blur_score * 0.4)\n            \n            return float(max(0, min(quality, 1.0)))\n        \n        except Exception as e:\n            logger.error(f"Error assessing image quality: {e}")\n            return 0.5\n    \n    def _optimize_image(self, image_path: str) -> Optional[str]:\n        """Optimize image for web publishing"""\n        try:\n            from PIL import Image\n            \n            image = Image.open(image_path)\n            \n            # Resize if too large\n            max_dimension = 1920\n            if max(image.width, image.height) > max_dimension:\n                ratio = max_dimension / max(image.width, image.height)\n                new_size = (int(image.width * ratio), int(image.height * ratio))\n                image = image.resize(new_size, Image.Resampling.LANCZOS)\n            \n            # Convert to RGB if necessary\n            if image.mode in ('RGBA', 'LA', 'P'):\n                image = image.convert('RGB')\n            \n            # Save optimized version\n            optimized_path = f"{image_path[:-4]}_optimized.jpg"\n            image.save(optimized_path, 'JPEG', quality=85, optimize=True)\n            \n            logger.info(f"Image optimized: {optimized_path}")\n            return optimized_path\n        \n        except Exception as e:\n            logger.warning(f"Error optimizing image: {e}")\n            return None\n    \n    def _convert_to_base64(self, image_path: str) -> str:\n        """Convert image to base64 for direct embedding"""\n        try:\n            with open(image_path, 'rb') as img_file:\n                return base64.b64encode(img_file.read()).decode('utf-8')\n        except Exception as e:\n            logger.error(f"Error converting image to base64: {e}")\n            return ""\n    \n    def _generate_image_hash(self, image_path: str) -> str:\n        """Generate perceptual hash of image for duplicate detection"""\n        try:\n            from PIL import Image\n            import numpy as np\n            \n            image = Image.open(image_path).resize((8, 8)).convert('L')\n            pixels = np.array(image)\n            avg_pixel = np.mean(pixels)\n            hash_string = ''.join(['1' if p > avg_pixel else '0' for p in pixels.flatten()])\n            return hash_string\n        except Exception as e:\n            logger.error(f"Error generating image hash: {e}")\n            return hashlib.md5(str(image_path).encode()).hexdigest()\n    \n    def _check_duplicate_image(self, image_hash: str) -> Dict:\n        """Check if similar image already exists"""\n        try:\n            conn = sqlite3.connect(self.db_path)\n            cursor = conn.cursor()\n            \n            # Look for matching hash\n            cursor.execute('''\n                SELECT id, draft_id, similarity_score FROM image_analysis\n                WHERE image_hash = ? LIMIT 1\n            ''', (image_hash,))\n            \n            result = cursor.fetchone()\n            conn.close()\n            \n            if result:\n                return {\n                    'is_duplicate': True,\n                    'original_id': result[0],\n                    'draft_id': result[1],\n                    'similarity': result[2]\n                }\n            \n            return {'is_duplicate': False}\n        \n        except Exception as e:\n            logger.error(f"Error checking duplicates: {e}")\n            return {'is_duplicate': False}\n    \n    def _generate_recommendations(self, watermark_result: Dict, quality_score: float) -> List[str]:\n        """Generate recommendations based on analysis"""\n        recommendations = []\n        \n        if watermark_result['has_watermark']:\n            if watermark_result['confidence'] > 0.7:\n                recommendations.append(f"Replace image - Strong {watermark_result['type']} watermark detected")\n            else:\n                recommendations.append(f"Consider replacing - Possible {watermark_result['type']} watermark detected")\n        \n        if quality_score < 0.6:\n            recommendations.append("Image quality is low - Consider using a higher resolution version")\n        elif quality_score < 0.8:\n            recommendations.append("Image quality could be improved")\n        \n        if not recommendations:\n            recommendations.append("Image looks good for publishing")\n        \n        return recommendations\n    \n    def _generate_notifications(self, watermark_result: Dict, duplicate_check: Dict, quality_score: float) -> List[Dict]:\n        """Generate user notifications"""\n        notifications = []\n        \n        if watermark_result['has_watermark']:\n            notifications.append({\n                'type': 'warning',\n                'severity': 'high' if watermark_result['confidence'] > 0.7 else 'medium',\n                'message': f"Watermark detected ({watermark_result['type']}) with {int(watermark_result['confidence']*100)}% confidence",\n                'action': 'Consider replacing the image'\n            })\n        \n        if duplicate_check.get('is_duplicate'):\n            notifications.append({\n                'type': 'info',\n                'severity': 'low',\n                'message': f"Similar image already used in draft {duplicate_check['draft_id']}",\n                'action': 'Verify this is intentional'\n            })\n        \n        if quality_score < 0.6:\n            notifications.append({\n                'type': 'warning',\n                'severity': 'medium',\n                'message': f"Low image quality score ({int(quality_score*100)}%)",\n                'action': 'Use a higher resolution version if available'\n            })\n        \n        return notifications\n    \n    def _store_analysis(self, draft_id: int, analysis: Dict):\n        """Store analysis results in database"""\n        try:\n            conn = sqlite3.connect(self.db_path)\n            cursor = conn.cursor()\n            \n            cursor.execute('''\n                INSERT INTO image_analysis\n                (draft_id, image_path, image_hash, watermark_detected, watermark_confidence, \n                 quality_score, metadata, analysis_json, created_at)\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ''', (\n                draft_id,\n                analysis['image_path'],\n                analysis['image_hash'],\n                analysis['watermark_detected'],\n                analysis['watermark_confidence'],\n                analysis['quality_score'],\n                str(analysis.get('metadata', {})),\n                str(analysis),\n                datetime.now().isoformat()\n            ))\n            \n            conn.commit()\n            conn.close()\n            logger.info(f"Analysis stored for draft {draft_id}")\n        \n        except Exception as e:\n            logger.error(f"Error storing analysis: {e}")\n
+"""
+Vision AI Module - Image Analysis with Watermark Detection
+Verifies images, detects watermarks, optimizes for web publishing
+"""
+
+import sqlite3
+import logging
+from typing import Dict, List, Optional, Tuple
+import hashlib
+from datetime import datetime
+import base64
+import io
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class VisionAI:
+    """Analyze images using Vision AI with watermark detection"""
+    
+    def __init__(self, db_path: str = 'nexuzy.db'):
+        self.db_path = db_path
+        self.vision_model = self._load_vision_model()
+        self.image_cache = {}  # Cache analyzed images
+    
+    def _load_vision_model(self):
+        """Load Vision AI model for image analysis"""
+        try:
+            from transformers import AutoImageProcessor, AutoModelForImageClassification
+            from PIL import Image
+            import torch
+            
+            logger.info("Loading Vision AI model...")
+            
+            # Try to load a lightweight vision model
+            try:
+                processor = AutoImageProcessor.from_pretrained(
+            local_files_only=True,
+                    "google/vit-base-patch16-224",
+                    trust_remote_code=True
+                )
+                model = AutoModelForImageClassification.from_pretrained(
+            local_files_only=True,
+                    "google/vit-base-patch16-224",
+                    trust_remote_code=True,
+                    device_map="cpu"
+                )
+                logger.info("[OK] Vision AI model loaded successfully")
+                return {'processor': processor, 'model': model}
+            except Exception as e:
+                logger.warning(f"Could not load vision model: {e}")
+                logger.info("Will use fallback image analysis mode")
+                return None
+        
+        except ImportError:
+            logger.warning("Vision AI dependencies not installed")
+            logger.warning("Install: pip install transformers pillow torch")
+            return None
+        except Exception as e:
+            logger.error(f"Error loading Vision AI: {e}")
+            return None
+    
+    def analyze_image(self, image_path: str, draft_id: int) -> Dict:
+        """
+        Comprehensive image analysis including watermark detection
+        
+        Args:
+            image_path: Path to image file or URL
+            draft_id: Associated draft ID
+        
+        Returns:
+            Analysis results dictionary
+        """
+        try:
+            logger.info(f"Analyzing image: {image_path}")
+            
+            # Load image
+            image_data = self._load_image(image_path)
+            if not image_data:
+                return {'status': 'failed', 'error': 'Could not load image'}
+            
+            # Generate image hash for duplicate detection
+            image_hash = self._generate_image_hash(image_data['path'])
+            
+            # Check for duplicates
+            duplicate_check = self._check_duplicate_image(image_hash)
+            if duplicate_check['is_duplicate']:
+                logger.warning(f"Duplicate image detected: {duplicate_check['original_id']}")
+            
+            # Detect watermarks
+            watermark_result = self._detect_watermark(image_data['path'])
+            
+            # Extract image metadata
+            metadata = self._extract_metadata(image_data['path'])
+            
+            # Assess image quality
+            quality_score = self._assess_image_quality(image_data['path'])
+            
+            # Optimize image
+            optimized_path = self._optimize_image(image_data['path'])
+            
+            # Convert to base64 for direct embedding
+            image_base64 = self._convert_to_base64(optimized_path or image_data['path'])
+            
+            # Compile analysis results
+            analysis = {
+                'status': 'success',
+                'image_path': image_path,
+                'image_hash': image_hash,
+                'watermark_detected': watermark_result['has_watermark'],
+                'watermark_confidence': watermark_result['confidence'],
+                'watermark_type': watermark_result['type'],
+                'quality_score': quality_score,
+                'metadata': metadata,
+                'duplicate_detected': duplicate_check['is_duplicate'],
+                'image_base64': image_base64,
+                'optimized_size': len(image_base64),
+                'recommendations': self._generate_recommendations(watermark_result, quality_score),
+                'notifications': self._generate_notifications(watermark_result, duplicate_check, quality_score)
+            }
+            
+            # Store analysis in database
+            self._store_analysis(draft_id, analysis)
+            
+            return analysis
+        
+        except Exception as e:
+            logger.error(f"Error analyzing image: {e}")
+            return {'status': 'failed', 'error': str(e)}
+    
+    def _load_image(self, image_path: str) -> Optional[Dict]:
+        """Load image from file or URL"""
+        try:
+            from PIL import Image
+            import requests
+            from io import BytesIO
+            
+            if image_path.startswith('http'):
+                # Load from URL
+                response = requests.get(image_path, timeout=10)
+                image = Image.open(BytesIO(response.content))
+                temp_path = f"/tmp/image_{hashlib.md5(image_path.encode()).hexdigest()}.png"
+                image.save(temp_path)
+            else:
+                # Load from file
+                image = Image.open(image_path)
+                temp_path = image_path
+            
+            return {
+                'path': temp_path,
+                'image': image,
+                'format': image.format,
+                'size': image.size
+            }
+        except Exception as e:
+            logger.error(f"Error loading image: {e}")
+            return None
+    
+    def _detect_watermark(self, image_path: str) -> Dict:
+        """
+        Detect watermarks in image using multiple techniques
+        """
+        try:
+            from PIL import Image
+            import numpy as np
+            
+            image = Image.open(image_path).convert('RGB')
+            img_array = np.array(image)
+            
+            # Check for text watermarks
+            text_watermark = self._detect_text_watermark(img_array)
+            
+            # Check for logo watermarks
+            logo_watermark = self._detect_logo_watermark(img_array)
+            
+            # Check for gradient watermarks
+            gradient_watermark = self._detect_gradient_watermark(img_array)
+            
+            # Compile results
+            has_watermark = any([text_watermark['detected'], logo_watermark['detected'], gradient_watermark['detected']])
+            
+            confidence = max([text_watermark['confidence'], logo_watermark['confidence'], gradient_watermark['confidence']])
+            
+            watermark_type = []
+            if text_watermark['detected']:
+                watermark_type.append('text')
+            if logo_watermark['detected']:
+                watermark_type.append('logo')
+            if gradient_watermark['detected']:
+                watermark_type.append('gradient')
+            
+            logger.info(f"Watermark detection: {has_watermark} (confidence: {confidence})")
+            
+            return {
+                'has_watermark': has_watermark,
+                'confidence': confidence,
+                'type': ', '.join(watermark_type) if watermark_type else 'none',
+                'details': {
+                    'text': text_watermark,
+                    'logo': logo_watermark,
+                    'gradient': gradient_watermark
+                }
+            }
+        
+        except Exception as e:
+            logger.error(f"Error detecting watermark: {e}")
+            return {
+                'has_watermark': False,
+                'confidence': 0,
+                'type': 'unknown',
+                'error': str(e)
+            }
+    
+    def _detect_text_watermark(self, img_array) -> Dict:
+        """Detect text-based watermarks"""
+        try:
+            import numpy as np
+            
+            # Convert to grayscale for text detection
+            gray = np.mean(img_array, axis=2)
+            
+            # Calculate edge density (text has high edges)
+            edges = np.abs(np.diff(gray))
+            edge_density = np.mean(edges)
+            
+            # Threshold-based detection
+            text_detected = edge_density > 15  # Adjust threshold based on testing
+            confidence = min(edge_density / 50, 1.0)  # Normalize to 0-1
+            
+            return {
+                'detected': text_detected,
+                'confidence': float(confidence),
+                'edge_density': float(edge_density)
+            }
+        except Exception as e:
+            logger.debug(f"Error in text watermark detection: {e}")
+            return {'detected': False, 'confidence': 0}
+    
+    def _detect_logo_watermark(self, img_array) -> Dict:
+        """Detect logo-based watermarks in corners"""
+        try:
+            import numpy as np
+            
+            height, width, _ = img_array.shape
+            
+            # Check corners where logos typically appear
+            corner_size = min(height // 4, width // 4)
+            corners = [
+                img_array[:corner_size, :corner_size],  # Top-left
+                img_array[:corner_size, -corner_size:],  # Top-right
+                img_array[-corner_size:, :corner_size],  # Bottom-left
+                img_array[-corner_size:, -corner_size:]   # Bottom-right
+            ]
+            
+            # Calculate color variance in corners
+            corner_variances = [np.var(corner) for corner in corners]
+            avg_corner_variance = np.mean(corner_variances)
+            
+            # High variance suggests distinct logo
+            logo_detected = avg_corner_variance > 500  # Adjust threshold
+            confidence = min(avg_corner_variance / 2000, 1.0)
+            
+            return {
+                'detected': logo_detected,
+                'confidence': float(confidence),
+                'variance': float(avg_corner_variance)
+            }
+        except Exception as e:
+            logger.debug(f"Error in logo watermark detection: {e}")
+            return {'detected': False, 'confidence': 0}
+    
+    def _detect_gradient_watermark(self, img_array) -> Dict:
+        """Detect gradient or overlay watermarks"""
+        try:
+            import numpy as np
+            
+            # Check for semi-transparent overlays
+            # Analyze color distribution
+            color_std = np.std(img_array, axis=(0, 1))
+            avg_color_std = np.mean(color_std)
+            
+            # Low color std suggests overlay
+            overlay_detected = avg_color_std < 30  # Adjust threshold
+            confidence = (50 - avg_color_std) / 50 if avg_color_std < 50 else 0
+            confidence = max(0, min(confidence, 1.0))
+            
+            return {
+                'detected': overlay_detected,
+                'confidence': float(confidence),
+                'color_variance': float(avg_color_std)
+            }
+        except Exception as e:
+            logger.debug(f"Error in gradient watermark detection: {e}")
+            return {'detected': False, 'confidence': 0}
+    
+    def _extract_metadata(self, image_path: str) -> Dict:
+        """Extract EXIF and other metadata"""
+        try:
+            from PIL import Image
+            from PIL.ExifTags import TAGS
+            
+            image = Image.open(image_path)
+            metadata = {
+                'format': image.format,
+                'size': image.size,
+                'width': image.width,
+                'height': image.height,
+                'mode': image.mode,
+                'exif_data': {}
+            }
+            
+            # Extract EXIF data if available
+            try:
+                exif_data = image.getexif()
+                for tag_id, value in exif_data.items():
+                    tag_name = TAGS.get(tag_id, tag_id)
+                    metadata['exif_data'][tag_name] = str(value)[:100]  # Limit to 100 chars
+            except:
+                pass
+            
+            return metadata
+        except Exception as e:
+            logger.error(f"Error extracting metadata: {e}")
+            return {}
+    
+    def _assess_image_quality(self, image_path: str) -> float:
+        """Assess overall image quality (0-1 scale)"""
+        try:
+            from PIL import Image
+            import numpy as np
+            
+            image = Image.open(image_path)
+            img_array = np.array(image)
+            
+            # Check dimensions
+            min_dimension = min(image.width, image.height)
+            size_score = min(min_dimension / 1920, 1.0)  # Good quality if > 1920px
+            
+            # Check color depth
+            if image.mode == 'RGB':
+                color_score = 1.0
+            elif image.mode == 'RGBA':
+                color_score = 0.9
+            else:
+                color_score = 0.7
+            
+            # Check blur (using Laplacian variance)
+            if image.mode != 'RGB':
+                img_array = Image.new('RGB', image.size, color=image.getexif().get(274, 1))
+            
+            # Simple blur detection
+            gray = np.mean(img_array, axis=2) if len(img_array.shape) == 3 else img_array
+            edges = np.abs(np.diff(gray))
+            blur_score = min(np.mean(edges) / 20, 1.0)
+            
+            # Combined quality score
+            quality = (size_score * 0.3 + color_score * 0.3 + blur_score * 0.4)
+            
+            return float(max(0, min(quality, 1.0)))
+        
+        except Exception as e:
+            logger.error(f"Error assessing image quality: {e}")
+            return 0.5
+    
+    def _optimize_image(self, image_path: str) -> Optional[str]:
+        """Optimize image for web publishing"""
+        try:
+            from PIL import Image
+            
+            image = Image.open(image_path)
+            
+            # Resize if too large
+            max_dimension = 1920
+            if max(image.width, image.height) > max_dimension:
+                ratio = max_dimension / max(image.width, image.height)
+                new_size = (int(image.width * ratio), int(image.height * ratio))
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convert to RGB if necessary
+            if image.mode in ('RGBA', 'LA', 'P'):
+                image = image.convert('RGB')
+            
+            # Save optimized version
+            optimized_path = f"{image_path[:-4]}_optimized.jpg"
+            image.save(optimized_path, 'JPEG', quality=85, optimize=True)
+            
+            logger.info(f"Image optimized: {optimized_path}")
+            return optimized_path
+        
+        except Exception as e:
+            logger.warning(f"Error optimizing image: {e}")
+            return None
+    
+    def _convert_to_base64(self, image_path: str) -> str:
+        """Convert image to base64 for direct embedding"""
+        try:
+            with open(image_path, 'rb') as img_file:
+                return base64.b64encode(img_file.read()).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error converting image to base64: {e}")
+            return ""
+    
+    def _generate_image_hash(self, image_path: str) -> str:
+        """Generate perceptual hash of image for duplicate detection"""
+        try:
+            from PIL import Image
+            import numpy as np
+            
+            image = Image.open(image_path).resize((8, 8)).convert('L')
+            pixels = np.array(image)
+            avg_pixel = np.mean(pixels)
+            hash_string = ''.join(['1' if p > avg_pixel else '0' for p in pixels.flatten()])
+            return hash_string
+        except Exception as e:
+            logger.error(f"Error generating image hash: {e}")
+            return hashlib.md5(str(image_path).encode()).hexdigest()
+    
+    def _check_duplicate_image(self, image_hash: str) -> Dict:
+        """Check if similar image already exists"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Look for matching hash
+            cursor.execute('''
+                SELECT id, draft_id, similarity_score FROM image_analysis
+                WHERE image_hash = ? LIMIT 1
+            ''', (image_hash,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                return {
+                    'is_duplicate': True,
+                    'original_id': result[0],
+                    'draft_id': result[1],
+                    'similarity': result[2]
+                }
+            
+            return {'is_duplicate': False}
+        
+        except Exception as e:
+            logger.error(f"Error checking duplicates: {e}")
+            return {'is_duplicate': False}
+    
+    def _generate_recommendations(self, watermark_result: Dict, quality_score: float) -> List[str]:
+        """Generate recommendations based on analysis"""
+        recommendations = []
+        
+        if watermark_result['has_watermark']:
+            if watermark_result['confidence'] > 0.7:
+                recommendations.append(f"Replace image - Strong {watermark_result['type']} watermark detected")
+            else:
+                recommendations.append(f"Consider replacing - Possible {watermark_result['type']} watermark detected")
+        
+        if quality_score < 0.6:
+            recommendations.append("Image quality is low - Consider using a higher resolution version")
+        elif quality_score < 0.8:
+            recommendations.append("Image quality could be improved")
+        
+        if not recommendations:
+            recommendations.append("Image looks good for publishing")
+        
+        return recommendations
+    
+    def _generate_notifications(self, watermark_result: Dict, duplicate_check: Dict, quality_score: float) -> List[Dict]:
+        """Generate user notifications"""
+        notifications = []
+        
+        if watermark_result['has_watermark']:
+            notifications.append({
+                'type': 'warning',
+                'severity': 'high' if watermark_result['confidence'] > 0.7 else 'medium',
+                'message': f"Watermark detected ({watermark_result['type']}) with {int(watermark_result['confidence']*100)}% confidence",
+                'action': 'Consider replacing the image'
+            })
+        
+        if duplicate_check.get('is_duplicate'):
+            notifications.append({
+                'type': 'info',
+                'severity': 'low',
+                'message': f"Similar image already used in draft {duplicate_check['draft_id']}",
+                'action': 'Verify this is intentional'
+            })
+        
+        if quality_score < 0.6:
+            notifications.append({
+                'type': 'warning',
+                'severity': 'medium',
+                'message': f"Low image quality score ({int(quality_score*100)}%)",
+                'action': 'Use a higher resolution version if available'
+            })
+        
+        return notifications
+    
+    def _store_analysis(self, draft_id: int, analysis: Dict):
+        """Store analysis results in database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO image_analysis
+                (draft_id, image_path, image_hash, watermark_detected, watermark_confidence, 
+                 quality_score, metadata, analysis_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                draft_id,
+                analysis['image_path'],
+                analysis['image_hash'],
+                analysis['watermark_detected'],
+                analysis['watermark_confidence'],
+                analysis['quality_score'],
+                str(analysis.get('metadata', {})),
+                str(analysis),
+                datetime.now().isoformat()
+            ))
+            
+            conn.commit()
+            conn.close()
+            logger.info(f"Analysis stored for draft {draft_id}")
+        
+        except Exception as e:
+            logger.error(f"Error storing analysis: {e}")
