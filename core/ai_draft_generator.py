@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class DraftGenerator:
     """Generate complete AI-rewritten news articles with GGUF models"""
     
-    def __init__(self, db_path: str, model_name: str = 'models/tinyllama-1.1b-chat-v1.0.Q8_0.gguf'):
+    def __init__(self, db_path: str, model_name: str = 'models/phi-2.Q4_K_M.gguf'):
         self.db_path = db_path
         self.model_name = model_name
         self.model_file = Path(model_name).name  # Extract filename from path
@@ -37,14 +37,31 @@ class DraftGenerator:
         # Model status - FAIL if model not loaded
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
-            logger.error("📥 Download model from: https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF")
+            logger.error("📥 Download Phi-2 from: https://huggingface.co/TheBloke/phi-2-GGUF/blob/main/phi-2.Q4_K_M.gguf")
             logger.error("💡 Place model file in: models/ directory")
             logger.error("⚠️  NO SAFE MODE - Article generation will FAIL without model")
         else:
             logger.info("✅ AI Writer LOADED - Full AI generation enabled")
     
+    def _detect_model_type(self, model_path: Path) -> str:
+        """Auto-detect model type from filename"""
+        filename_lower = str(model_path).lower()
+        
+        if 'phi-2' in filename_lower or 'phi2' in filename_lower:
+            return 'phi'
+        elif 'mistral' in filename_lower:
+            return 'mistral'
+        elif 'llama' in filename_lower or 'tinyllama' in filename_lower:
+            return 'llama'
+        elif 'qwen' in filename_lower:
+            return 'qwen'
+        else:
+            # Default to llama (most common)
+            logger.warning(f"⚠️  Could not detect model type from '{model_path.name}', defaulting to 'llama'")
+            return 'llama'
+    
     def _load_model(self):
-        """Load GGUF quantized model - NO FALLBACK"""
+        """Load GGUF quantized model - AUTO-DETECT MODEL TYPE"""
         try:
             from ctransformers import AutoModelForCausalLM
             
@@ -55,7 +72,8 @@ class DraftGenerator:
                 Path(self.model_name),  # Direct path provided
                 Path('models') / self.model_file,  # models/filename
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,  # User cache
-                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',  # Explicit fallback
+                Path('models') / 'phi-2.Q4_K_M.gguf',  # Recommended model
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',  # Old default
                 Path('models') / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',  # Alternative quant
             ]
             
@@ -72,19 +90,23 @@ class DraftGenerator:
                     logger.error(f"  ✗ {p}")
                 return None
             
+            # Auto-detect model type
+            model_type = self._detect_model_type(model_path)
+            logger.info(f"🔍 Detected model type: {model_type}")
+            
             logger.info(f"⏳ Loading GGUF model from: {model_path} (this may take 10-30 seconds)...")
             
             # Load GGUF model with ctransformers
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
-                model_type='llama',
+                model_type=model_type,  # AUTO-DETECTED!
                 context_length=2048,  # Increased for longer articles
                 max_new_tokens=1200,
                 threads=4,  # Use more CPU threads
                 gpu_layers=0  # CPU only
             )
             
-            logger.info(f"✅ GGUF model loaded successfully: {model_path.name}")
+            logger.info(f"✅ GGUF model loaded successfully: {model_path.name} (type: {model_type})")
             return llm
         
         except ImportError:
@@ -361,40 +383,32 @@ Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
         # IMPROVED PROMPT - Natural article structure
-        prompt = f"""<s>[INST] You are a professional journalist. Write a complete, detailed news article (800-1200 words) based on this headline.
+        prompt = f"""Write a professional news article (600-800 words) based on this headline.
 
 Headline: {headline}
 Summary: {summary}
 
 {topic_context}
 
-Write in professional journalism style with these sections:
-1. Introduction (lead paragraph)
-2. Background and context
-3. Key details and facts
-4. Analysis and implications
-5. Future outlook (brief)
+Write a clear, factual news article with:
+- Opening paragraph summarizing the key facts
+- Background information and context
+- Important details from the summary
+- Professional journalistic tone
 
-Rules:
-- Be factual, objective, and professional
-- Use clear, journalistic language
-- Include relevant details from the summary
-- Do not mention AI, bots, or automation
-- Write naturally without meta-commentary
-
-Write the complete article now:[/INST]"""
+Article:"""
         
         try:
-            logger.info("⏳ Generating with AI model (30-60 seconds)...")
+            logger.info("⏳ Generating with AI model (20-40 seconds)...")
             logger.info(f"📝 Prompt length: {len(prompt)} chars")
             
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=1200,  # INCREASED from 512
-                temperature=0.7,       # Slightly creative
-                top_p=0.95,            # Better diversity
-                repetition_penalty=1.15,  # Reduce repetition
-                stop=["</s>", "[INST]", "[/INST]"],  # REMOVED aggressive stops
+                max_new_tokens=1000,
+                temperature=0.7,
+                top_p=0.95,
+                repetition_penalty=1.15,
+                stop=["\n\n\n", "Article:", "Summary:"],
                 stream=False
             )
             
@@ -424,11 +438,9 @@ Write the complete article now:[/INST]"""
             if not generated_text or len(generated_text) < 100:
                 logger.error(f"❌ Model generated too little text: {len(generated_text)} chars")
                 logger.error(f"📄 Full generated text: '{generated_text}'")
-                logger.warning("⚠️  TinyLlama 1.1B is TOO SMALL for this task!")
-                logger.warning("📥 Download Phi-2 (2.7B) or Mistral-7B instead")
-                logger.warning("🔗 See RECOMMENDED_MODELS.md for download links")
+                logger.warning("⚠️  Model may be too small or prompt too complex")
                 return {
-                    'error': f'AI generated only {len(generated_text)} characters. TinyLlama 1.1B is too small. Use Phi-2 or Mistral-7B.',
+                    'error': f'AI generated only {len(generated_text)} characters. Need 600+ words.',
                     'title': headline,
                     'body_draft': '',
                     'summary': summary,
@@ -456,9 +468,8 @@ Write the complete article now:[/INST]"""
             word_count = len(cleaned_text.split())
             logger.info(f"✅ AI generated {word_count} words")
             
-            if word_count < 100:
-                logger.warning(f"⚠️  Word count very low: {word_count}")
-                logger.warning("📥 Consider using Phi-2 or Mistral-7B for better results")
+            if word_count < 200:
+                logger.warning(f"⚠️  Word count low: {word_count}. Article may be incomplete.")
             
             return {
                 'title': headline,
