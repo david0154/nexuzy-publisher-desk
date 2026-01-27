@@ -195,8 +195,10 @@ class Translator:
             **inputs,
             forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(target_code),
             max_length=512,
+            do_sample=True,
             temperature=0.7,
-            top_p=0.9
+            top_p=0.9,
+            num_beams=1
         )
         
         # Decode
