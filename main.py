@@ -701,7 +701,7 @@ class NexuzyPublisherApp(tk.Tk):
                     self.verify_news_background()
                 self.after(0, lambda: self._fetch_complete(count, message))
             except Exception as e:
-                self.after(0, lambda: self._fetch_error(str(e)))
+                self.after(0, lambda err=str(e): self._fetch_error(err))
         
         threading.Thread(target=fetch_thread, daemon=True).start()
     
@@ -740,9 +740,9 @@ class NexuzyPublisherApp(tk.Tk):
         def group_thread():
             try:
                 groups = self.news_matcher.group_similar_headlines(self.current_workspace_id)
-                self.after(0, lambda: self._group_complete(groups))
+                self.after(0, lambda res=groups: self._group_complete(res))
             except Exception as e:
-                self.after(0, lambda: self._group_error(str(e)))
+                self.after(0, lambda err=str(e): self._group_error(err))
         
         threading.Thread(target=group_thread, daemon=True).start()
     
@@ -907,6 +907,7 @@ class NexuzyPublisherApp(tk.Tk):
                 from io import BytesIO
                 
                 response = requests.get(image_url, timeout=10)
+                response.raise_for_status()  # Raise error for bad status
                 img = Image.open(BytesIO(response.content))
                 
                 # Save temporarily
@@ -919,9 +920,9 @@ class NexuzyPublisherApp(tk.Tk):
                 # Clean up
                 os.remove(temp_path)
                 
-                self.after(0, lambda: self._watermark_check_complete(result))
+                self.after(0, lambda res=result: self._watermark_check_complete(res))
             except Exception as e:
-                self.after(0, lambda: self._watermark_check_error(str(e)))
+                self.after(0, lambda err=str(e): self._watermark_check_error(err))
         
         threading.Thread(target=check_thread, daemon=True).start()
     
@@ -965,7 +966,7 @@ class NexuzyPublisherApp(tk.Tk):
                 draft = self.draft_generator.generate_draft(news['id'])
                 self.after(0, lambda: self._draft_generated(draft, news))
             except Exception as e:
-                self.after(0, lambda: self._draft_error(str(e)))
+                self.after(0, lambda err=str(e): self._draft_error(err))
         
         threading.Thread(target=generate_thread, daemon=True).start()
     
@@ -1044,7 +1045,7 @@ class NexuzyPublisherApp(tk.Tk):
                     translation = self.translator.translate_draft(self.current_draft_id, target_lang)
                     self.after(0, lambda: self._translation_complete(translation, target_lang))
                 except Exception as e:
-                    self.after(0, lambda: self._translation_error(str(e)))
+                    self.after(0, lambda err=str(e): self._translation_error(err))
             
             threading.Thread(target=translate_thread, daemon=True).start()
         
@@ -1137,9 +1138,9 @@ class NexuzyPublisherApp(tk.Tk):
             def publish_thread():
                 try:
                     result = self.wordpress_api.publish_draft(self.current_draft_id, self.current_workspace_id)
-                    self.after(0, lambda: self._publish_complete(result))
+                    self.after(0, lambda res=result: self._publish_complete(res))
                 except Exception as e:
-                    self.after(0, lambda: self._publish_error(str(e)))
+                    self.after(0, lambda err=str(e): self._publish_error(err))
             
             threading.Thread(target=publish_thread, daemon=True).start()
     
@@ -1450,9 +1451,9 @@ class NexuzyPublisherApp(tk.Tk):
         def translate_thread():
             try:
                 translation = self.translator.translate_draft(draft_id, target_lang)
-                self.after(0, lambda: self._translation_preview_complete(translation))
+                self.after(0, lambda res=translation: self._translation_preview_complete(res))
             except Exception as e:
-                self.after(0, lambda: self._translation_error(str(e)))
+                self.after(0, lambda err=str(e): self._translation_error(err))
         
         threading.Thread(target=translate_thread, daemon=True).start()
     
@@ -1570,9 +1571,9 @@ class NexuzyPublisherApp(tk.Tk):
         def test_thread():
             try:
                 result = self.wordpress_api.test_connection(url, username, password)
-                self.after(0, lambda: self._test_complete(result))
+                self.after(0, lambda res=result: self._test_complete(res))
             except Exception as e:
-                self.after(0, lambda: self._test_error(str(e)))
+                self.after(0, lambda err=str(e): self._test_error(err))
         
         threading.Thread(target=test_thread, daemon=True).start()
     
@@ -1630,7 +1631,7 @@ class NexuzyPublisherApp(tk.Tk):
                     result = self.vision_ai.detect_watermark(file_path)
                     self.after(0, lambda: self._show_vision_results(result, file_path))
                 except Exception as e:
-                    self.after(0, lambda: self._vision_error(str(e)))
+                    self.after(0, lambda err=str(e): self._vision_error(err))
             
             threading.Thread(target=analyze_thread, daemon=True).start()
     
@@ -1750,4 +1751,4 @@ def main():
     app.mainloop()
 
 if __name__ == '__main__':
-    main()# [Content will be too long - breaking into multiple commits]
+    main()
