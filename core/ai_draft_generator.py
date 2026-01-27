@@ -21,18 +21,40 @@ import sys
 
 logger = logging.getLogger(__name__)
 
+# 🆕 GLOBAL MODEL CACHE - Load once, use forever!
+_CACHED_MODEL = None
+_CACHED_SENTENCE_MODEL = None
+
 class DraftGenerator:
     """Generate complete AI-rewritten news articles with GGUF models"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
+        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL
+        
         self.db_path = db_path
         self.model_name = model_name
         self.model_file = Path(model_name).name  # Extract filename from path
-        self.llm = self._load_model()
         self.translation_keywords = self._load_translation_keywords()
         
-        # Initialize sentence improvement model (optional, non-blocking)
-        self.sentence_model = self._load_sentence_model()
+        # 🆕 USE CACHED MODEL if available
+        if _CACHED_MODEL:
+            logger.info("✅ Using cached AI model (INSTANT - no loading time)")
+            self.llm = _CACHED_MODEL
+        else:
+            logger.info("⏳ First load - caching model for future use (30-60 seconds)...")
+            self.llm = self._load_model()
+            if self.llm:
+                _CACHED_MODEL = self.llm  # Cache globally!
+                logger.info("💾 Model cached - all future generations will be instant!")
+        
+        # 🆕 USE CACHED SENTENCE MODEL if available
+        if _CACHED_SENTENCE_MODEL:
+            logger.info("✅ Using cached sentence model")
+            self.sentence_model = _CACHED_SENTENCE_MODEL
+        else:
+            self.sentence_model = self._load_sentence_model()
+            if self.sentence_model:
+                _CACHED_SENTENCE_MODEL = self.sentence_model
         
         # Model status - FAIL if model not loaded
         if not self.llm:
@@ -337,6 +359,24 @@ class DraftGenerator:
             local_image_path = None
             if image_url:
                 local_image_path = self.download_and_store_image(image_url, news_id)
+                
+                # 🆕 CHECK FOR WATERMARK!
+                if local_image_path:
+                    try:
+                        from core.vision_ai import VisionAI
+                        vision = VisionAI(self.db_path)
+                        watermark_check = vision._detect_watermark(local_image_path)
+                        
+                        if watermark_check['has_watermark'] and watermark_check['confidence'] > 0.6:
+                            logger.warning(f"⚠️ WATERMARK DETECTED: {watermark_check['type']} (confidence: {watermark_check['confidence']:.2f})")
+                            logger.warning("❌ Rejecting watermarked image...")
+                            image_url = None  # Don't use watermarked image
+                            local_image_path = None
+                        else:
+                            logger.info(f"✅ Image clean - no watermark detected (confidence: {watermark_check['confidence']:.2f})")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not check watermark: {e}")
+                        logger.info("Continuing with image (watermark check failed)")
             
             # Extract topic information
             topic_info = self._extract_topic_info(headline, summary or '', category)
