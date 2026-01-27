@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class DraftGenerator:
     """Generate complete AI-rewritten news articles with GGUF models"""
     
-    def __init__(self, db_path: str, model_name: str = 'models/phi-2.Q4_K_M.gguf'):
+    def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
         self.db_path = db_path
         self.model_name = model_name
         self.model_file = Path(model_name).name  # Extract filename from path
@@ -37,7 +37,7 @@ class DraftGenerator:
         # Model status - FAIL if model not loaded
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
-            logger.error("📥 Download Phi-2 from: https://huggingface.co/TheBloke/phi-2-GGUF/blob/main/phi-2.Q4_K_M.gguf")
+            logger.error("📥 Download mistral-7b from: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf")
             logger.error("💡 Place model file in: models/ directory")
             logger.error("⚠️  NO SAFE MODE - Article generation will FAIL without model")
         else:
@@ -72,9 +72,8 @@ class DraftGenerator:
                 Path(self.model_name),  # Direct path provided
                 Path('models') / self.model_file,  # models/filename
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,  # User cache
-                Path('models') / 'phi-2.Q4_K_M.gguf',  # Recommended model
-                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',  # Old default
-                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',  # Alternative quant
+                Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',  # Recommended model
+               Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',  # Alternative quant
             ]
             
             model_path = None
