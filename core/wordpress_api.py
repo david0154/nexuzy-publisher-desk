@@ -1,12 +1,12 @@
 """
-WordPress API Module - PROPER Image Upload Method
-Downloads images from source then uploads to WordPress media library
+WordPress API Module - FIXED Translation Push + Category Support
+Proper image upload + Content + Categories + Tags
 """
 
 import requests
 import sqlite3
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pathlib import Path
 import tempfile
 import hashlib
@@ -15,7 +15,7 @@ import re
 logger = logging.getLogger(__name__)
 
 class WordPressAPI:
-    """Handle WordPress API interactions with PROPER image upload"""
+    """Handle WordPress API interactions with PROPER image upload + categories"""
     
     def __init__(self, db_path: str = 'nexuzy.db'):
         self.db_path = db_path
@@ -24,6 +24,10 @@ class WordPressAPI:
         self.base_url = ''
         self.media_url = ''
         self.posts_url = ''
+        self.categories_url = ''
+        self.tags_url = ''
+        self._category_cache = {}  # Cache category IDs
+        self._tag_cache = {}  # Cache tag IDs
     
     def _initialize_connection(self, workspace_id: int) -> bool:
         """Initialize WordPress connection from workspace credentials"""
@@ -43,6 +47,8 @@ class WordPressAPI:
             self.base_url = f"{self.site_url}/wp-json/wp/v2"
             self.media_url = f"{self.base_url}/media"
             self.posts_url = f"{self.base_url}/posts"
+            self.categories_url = f"{self.base_url}/categories"
+            self.tags_url = f"{self.base_url}/tags"
             
             # Create authenticated session
             self.session = requests.Session()
@@ -58,19 +64,7 @@ class WordPressAPI:
             return False
 
     def upload_image_from_url(self, image_url: str, title: str = '') -> Optional[int]:
-        """
-        PROPER METHOD: Download image from URL → Upload to WordPress media library
-        
-        This is the ONLY reliable way - WordPress REST API does NOT support
-        direct URL uploads without custom plugins!
-        
-        Args:
-            image_url: Direct URL to image
-            title: Optional title for the media item
-        
-        Returns:
-            WordPress media ID or None if failed
-        """
+        """Download image from URL → Upload to WordPress media library"""
         if not image_url or not image_url.startswith('http'):
             logger.warning(f"Invalid image URL: {image_url}")
             return None
@@ -92,7 +86,6 @@ class WordPressAPI:
             # Step 2: Detect filename and content type
             filename = image_url.split('/')[-1].split('?')[0]
             if not filename or '.' not in filename:
-                # Fallback to content type
                 content_type = img_response.headers.get('Content-Type', 'image/jpeg')
                 ext = content_type.split('/')[-1].split(';')[0]
                 filename = f"featured-image.{ext}"
@@ -106,17 +99,14 @@ class WordPressAPI:
             logger.info(f"📤 Uploading to WordPress: {filename} ({len(img_response.content)/1024:.1f} KB)")
             
             # Step 3: Upload to WordPress using multipart/form-data
-            # This is the CORE WordPress REST API method - works everywhere!
             files = {
                 'file': (filename, img_response.content, content_type)
             }
             
-            # Set proper headers (WordPress requirement)
             headers = {
                 'Content-Disposition': f'attachment; filename="{filename}"'
             }
             
-            # Add title if provided
             data = {}
             if title:
                 data['title'] = title
@@ -130,49 +120,175 @@ class WordPressAPI:
                 timeout=60
             )
             
-            # Step 4: Handle response
             if not response.ok:
                 logger.error(f"Upload failed: HTTP {response.status_code}")
                 logger.error(f"Response: {response.text[:500]}")
-                
-                # Check for common errors
-                if response.status_code == 401:
-                    logger.error("❌ AUTHENTICATION FAILED: Check your App Password!")
-                elif response.status_code == 403:
-                    logger.error("❌ PERMISSION DENIED: User needs 'author' role or higher!")
-                elif response.status_code == 413:
-                    logger.error("❌ FILE TOO LARGE: Increase upload_max_filesize in PHP!")
-                
                 return None
             
             media_data = response.json()
             media_id = media_data.get('id')
             
-            if not media_id:
-                logger.error("No media ID in response")
-                return None
+            if media_id:
+                logger.info(f"✅ Image uploaded! Media ID: {media_id}")
+                return media_id
             
-            logger.info(f"✅ Image uploaded successfully! Media ID: {media_id}")
-            logger.info(f"   URL: {media_data.get('source_url', 'N/A')}")
-            
-            return media_id
+            return None
         
-        except requests.exceptions.Timeout:
-            logger.error("❌ Upload timeout - image too large or slow connection")
-            return None
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Network error: {e}")
-            return None
         except Exception as e:
             logger.error(f"❌ Error uploading image: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None
     
-    def publish_draft(self, draft_id: int, workspace_id: int) -> Optional[Dict]:
+    def get_or_create_category(self, category_name: str) -> Optional[int]:
         """
-        Publish draft to WordPress with proper Gutenberg block format
-        Downloads and uploads images correctly
+        Get existing WordPress category ID or create new one
+        
+        Args:
+            category_name: Category name (e.g., 'Technology', 'Sports')
+        
+        Returns:
+            WordPress category ID or None if failed
+        """
+        if not category_name or not category_name.strip():
+            return None
+        
+        category_name = category_name.strip()
+        
+        # Check cache first
+        if category_name in self._category_cache:
+            logger.debug(f"Using cached category: {category_name} (ID: {self._category_cache[category_name]})")
+            return self._category_cache[category_name]
+        
+        try:
+            # Search for existing category
+            logger.info(f"🔍 Searching for category: {category_name}")
+            response = self.session.get(
+                self.categories_url,
+                params={'search': category_name, 'per_page': 10},
+                timeout=10
+            )
+            
+            if response.ok:
+                categories = response.json()
+                
+                # Find exact match (case-insensitive)
+                for cat in categories:
+                    if cat.get('name', '').lower() == category_name.lower():
+                        cat_id = cat.get('id')
+                        logger.info(f"✅ Found existing category: {category_name} (ID: {cat_id})")
+                        self._category_cache[category_name] = cat_id
+                        return cat_id
+            
+            # Category doesn't exist - create it
+            logger.info(f"📝 Creating new category: {category_name}")
+            create_response = self.session.post(
+                self.categories_url,
+                json={'name': category_name},
+                timeout=10
+            )
+            
+            if create_response.ok:
+                new_cat = create_response.json()
+                cat_id = new_cat.get('id')
+                logger.info(f"✅ Category created: {category_name} (ID: {cat_id})")
+                self._category_cache[category_name] = cat_id
+                return cat_id
+            else:
+                logger.error(f"Failed to create category: HTTP {create_response.status_code}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Error handling category '{category_name}': {e}")
+            return None
+    
+    def get_or_create_tag(self, tag_name: str) -> Optional[int]:
+        """Get existing WordPress tag ID or create new one"""
+        if not tag_name or not tag_name.strip():
+            return None
+        
+        tag_name = tag_name.strip()
+        
+        # Check cache
+        if tag_name in self._tag_cache:
+            return self._tag_cache[tag_name]
+        
+        try:
+            # Search for existing tag
+            response = self.session.get(
+                self.tags_url,
+                params={'search': tag_name, 'per_page': 10},
+                timeout=10
+            )
+            
+            if response.ok:
+                tags = response.json()
+                for tag in tags:
+                    if tag.get('name', '').lower() == tag_name.lower():
+                        tag_id = tag.get('id')
+                        self._tag_cache[tag_name] = tag_id
+                        return tag_id
+            
+            # Create new tag
+            create_response = self.session.post(
+                self.tags_url,
+                json={'name': tag_name},
+                timeout=10
+            )
+            
+            if create_response.ok:
+                new_tag = create_response.json()
+                tag_id = new_tag.get('id')
+                self._tag_cache[tag_name] = tag_id
+                return tag_id
+        
+        except Exception as e:
+            logger.error(f"Error handling tag '{tag_name}': {e}")
+        
+        return None
+    
+    def _extract_categories_from_draft(self, draft_id: int) -> List[str]:
+        """Extract category names from news source RSS feed"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get categories from news article
+            cursor.execute('''
+                SELECT n.category, r.category as feed_category
+                FROM ai_drafts d
+                JOIN news n ON d.news_id = n.id
+                LEFT JOIN rss_feeds r ON n.feed_id = r.id
+                WHERE d.id = ?
+            ''', (draft_id,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                categories = []
+                if result[0]:  # Article category
+                    categories.append(result[0])
+                if result[1]:  # Feed category
+                    categories.append(result[1])
+                return [cat.strip() for cat in categories if cat and cat.strip()]
+            
+            return []
+        
+        except Exception as e:
+            logger.error(f"Error extracting categories: {e}")
+            return []
+    
+    def publish_draft(self, draft_id: int, workspace_id: int, categories: Optional[List[str]] = None, tags: Optional[List[str]] = None) -> Optional[Dict]:
+        """
+        Publish draft to WordPress with FULL CONTENT + categories + tags
+        
+        Args:
+            draft_id: Draft ID from database
+            workspace_id: Workspace ID for credentials
+            categories: List of category names (optional, auto-detected if None)
+            tags: List of tag names (optional)
+        
+        Returns:
+            Dict with post details or None if failed
         """
         try:
             if not self._initialize_connection(workspace_id):
@@ -180,6 +296,8 @@ class WordPressAPI:
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Get draft with FULL CONTENT
             cursor.execute('''
                 SELECT title, body_draft, summary, image_url, source_url
                 FROM ai_drafts
@@ -193,34 +311,87 @@ class WordPressAPI:
                 logger.error(f"Draft {draft_id} not found")
                 return None
             
-            title, content, summary, image_url, source_url = result
+            title, body_content, summary, image_url, source_url = result
             
-            # Upload featured image (if available)
+            # CRITICAL: Check if content exists
+            if not body_content or not body_content.strip():
+                logger.error(f"❌ Draft {draft_id} has NO CONTENT! body_draft is empty!")
+                return None
+            
+            logger.info(f"📝 Preparing to publish: {title}")
+            logger.info(f"   Content length: {len(body_content)} characters")
+            
+            # Upload featured image
             featured_media_id = None
             if image_url:
                 logger.info(f"📸 Processing featured image: {image_url}")
                 featured_media_id = self.upload_image_from_url(image_url, title)
-                
                 if not featured_media_id:
                     logger.warning("⚠️ Featured image upload failed, continuing without image")
             
-            # Convert content to Gutenberg blocks
-            gutenberg_content = self._convert_to_gutenberg_blocks(content, featured_media_id)
+            # Handle categories
+            category_ids = []
+            if categories is None:
+                # Auto-detect from RSS feed
+                categories = self._extract_categories_from_draft(draft_id)
             
-            # Create WordPress post
+            if categories:
+                logger.info(f"📂 Processing categories: {', '.join(categories)}")
+                for cat_name in categories:
+                    cat_id = self.get_or_create_category(cat_name)
+                    if cat_id:
+                        category_ids.append(cat_id)
+                
+                if category_ids:
+                    logger.info(f"✅ Categories assigned: {len(category_ids)} categories")
+                else:
+                    logger.warning("⚠️ No categories assigned")
+            
+            # Handle tags
+            tag_ids = []
+            if tags:
+                logger.info(f"🏷️ Processing tags: {', '.join(tags)}")
+                for tag_name in tags:
+                    tag_id = self.get_or_create_tag(tag_name)
+                    if tag_id:
+                        tag_ids.append(tag_id)
+            
+            # Convert content to Gutenberg blocks
+            gutenberg_content = self._convert_to_gutenberg_blocks(body_content, featured_media_id)
+            
+            # CRITICAL: Verify content conversion
+            if not gutenberg_content or not gutenberg_content.strip():
+                logger.error(f"❌ Content conversion failed! Gutenberg blocks are empty!")
+                logger.error(f"   Original content length: {len(body_content)}")
+                return None
+            
+            logger.info(f"   Gutenberg blocks length: {len(gutenberg_content)} characters")
+            
+            # Create WordPress post with FULL DATA
             post_data = {
                 'title': title,
-                'content': gutenberg_content,
+                'content': gutenberg_content,  # CRITICAL: Full translated content
                 'excerpt': summary or '',
                 'status': 'draft',  # Create as draft for review
             }
             
-            # Attach featured image (this is how WordPress shows it in editor)
+            # Add featured image
             if featured_media_id:
                 post_data['featured_media'] = featured_media_id
                 logger.info(f"✅ Featured image attached: Media ID {featured_media_id}")
             
-            logger.info(f"📝 Creating WordPress post: {title}")
+            # Add categories
+            if category_ids:
+                post_data['categories'] = category_ids
+                logger.info(f"✅ Categories attached: {category_ids}")
+            
+            # Add tags
+            if tag_ids:
+                post_data['tags'] = tag_ids
+                logger.info(f"✅ Tags attached: {tag_ids}")
+            
+            logger.info(f"📤 Posting to WordPress...")
+            logger.debug(f"   Post data: title={len(title)} chars, content={len(gutenberg_content)} chars")
             
             response = self.session.post(
                 self.posts_url,
@@ -229,43 +400,50 @@ class WordPressAPI:
             )
             
             if not response.ok:
-                logger.error(f"Post creation failed: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text[:500]}")
+                logger.error(f"❌ Post creation failed: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text[:1000]}")
                 
-                # Common errors
                 if response.status_code == 401:
                     logger.error("❌ AUTHENTICATION FAILED")
                 elif response.status_code == 403:
-                    logger.error("❌ PERMISSION DENIED - User needs author/editor role")
+                    logger.error("❌ PERMISSION DENIED")
                 
                 return None
             
-            try:
-                post = response.json()
-                post_id = post.get('id')
-                post_url = post.get('link')
-                
-                if not post_id:
-                    logger.error("No post ID in response")
-                    return None
-                
-                logger.info(f"✅ Post created successfully!")
-                logger.info(f"   Post ID: {post_id}")
-                logger.info(f"   URL: {post_url}")
-                
-                return {
-                    'post_id': post_id,
-                    'url': post_url,
-                    'status': 'draft',
-                    'featured_image': featured_media_id
-                }
+            post = response.json()
+            post_id = post.get('id')
+            post_url = post.get('link')
             
-            except ValueError as e:
-                logger.error(f"JSON parsing error: {e}")
+            if not post_id:
+                logger.error("No post ID in response")
                 return None
+            
+            # Verify content was posted
+            posted_content = post.get('content', {}).get('rendered', '')
+            if not posted_content or len(posted_content) < 50:
+                logger.warning(f"⚠️ WARNING: Posted content seems too short!")
+                logger.warning(f"   Posted: {len(posted_content)} characters")
+                logger.warning(f"   Expected: {len(body_content)} characters")
+            
+            logger.info(f"\n✅ POST CREATED SUCCESSFULLY!")
+            logger.info(f"   Post ID: {post_id}")
+            logger.info(f"   URL: {post_url}")
+            logger.info(f"   Categories: {len(category_ids)} assigned")
+            logger.info(f"   Tags: {len(tag_ids)} assigned")
+            logger.info(f"   Content: {len(posted_content)} characters posted")
+            
+            return {
+                'post_id': post_id,
+                'url': post_url,
+                'status': 'draft',
+                'featured_image': featured_media_id,
+                'categories': category_ids,
+                'tags': tag_ids,
+                'content_length': len(posted_content)
+            }
         
         except Exception as e:
-            logger.error(f"Error publishing to WordPress: {e}")
+            logger.error(f"❌ Error publishing to WordPress: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
@@ -273,9 +451,11 @@ class WordPressAPI:
     def _convert_to_gutenberg_blocks(self, html_content: str, featured_media_id: Optional[int] = None) -> str:
         """
         Convert HTML content to WordPress Gutenberg blocks
-        Ensures proper rendering in WordPress block editor
+        CRITICAL: Must preserve ALL content
         """
-        import re
+        if not html_content or not html_content.strip():
+            logger.error("❌ Empty content passed to Gutenberg converter!")
+            return ""
         
         blocks = []
         
@@ -285,10 +465,10 @@ class WordPressAPI:
 <figure class="wp-block-image size-large"><img src="" alt="" class="wp-image-{featured_media_id}"/></figure>
 <!-- /wp:image -->''')
         
-        # Clean HTML content
+        # Clean and process content
         content = html_content.strip()
         
-        # Split by newlines and process each line
+        # Split by lines
         lines = content.split('\n')
         
         for line in lines:
@@ -299,19 +479,22 @@ class WordPressAPI:
             # Detect headings
             if line.startswith('<h2>') or line.startswith('<h2 '):
                 heading_text = re.sub(r'<.*?>', '', line)
-                blocks.append(f'''<!-- wp:heading -->
+                if heading_text.strip():
+                    blocks.append(f'''<!-- wp:heading -->
 <h2 class="wp-block-heading">{heading_text}</h2>
 <!-- /wp:heading -->''')
             
             elif line.startswith('<h3>') or line.startswith('<h3 '):
                 heading_text = re.sub(r'<.*?>', '', line)
-                blocks.append(f'''<!-- wp:heading {{"level":3}} -->
+                if heading_text.strip():
+                    blocks.append(f'''<!-- wp:heading {{"level":3}} -->
 <h3 class="wp-block-heading">{heading_text}</h3>
 <!-- /wp:heading -->''')
             
             elif line.startswith('<h4>') or line.startswith('<h4 '):
                 heading_text = re.sub(r'<.*?>', '', line)
-                blocks.append(f'''<!-- wp:heading {{"level":4}} -->
+                if heading_text.strip():
+                    blocks.append(f'''<!-- wp:heading {{"level":4}} -->
 <h4 class="wp-block-heading">{heading_text}</h4>
 <!-- /wp:heading -->''')
             
@@ -324,27 +507,38 @@ class WordPressAPI:
 <!-- /wp:paragraph -->''')
             
             # Detect lists
-            elif line.startswith('<ul>') or line.startswith('<ul '):
-                # Extract list items
-                items = re.findall(r'<li>(.*?)</li>', line)
+            elif '<ul>' in line or '<ul ' in line:
+                items = re.findall(r'<li>(.*?)</li>', line, re.DOTALL)
                 if items:
-                    list_html = '\n'.join([f'<li>{item}</li>' for item in items])
+                    list_html = '\n'.join([f'<li>{item.strip()}</li>' for item in items])
                     blocks.append(f'''<!-- wp:list -->
 <ul>{list_html}</ul>
 <!-- /wp:list -->''')
             
-            # Plain text (no HTML tags) - convert to paragraph
+            elif '<ol>' in line or '<ol ' in line:
+                items = re.findall(r'<li>(.*?)</li>', line, re.DOTALL)
+                if items:
+                    list_html = '\n'.join([f'<li>{item.strip()}</li>' for item in items])
+                    blocks.append(f'''<!-- wp:list {{"ordered":true}} -->
+<ol>{list_html}</ol>
+<!-- /wp:list -->''')
+            
+            # Plain text - convert to paragraph
             elif line and not line.startswith('<'):
                 blocks.append(f'''<!-- wp:paragraph -->
 <p>{line}</p>
 <!-- /wp:paragraph -->''')
         
-        return '\n\n'.join(blocks)
+        result = '\n\n'.join(blocks)
+        
+        if not result:
+            logger.error(f"❌ Gutenberg conversion produced empty result!")
+            logger.error(f"   Original content: {html_content[:200]}...")
+        
+        return result
     
     def test_connection(self, site_url: str, username: str, password: str) -> bool:
-        """
-        Test WordPress connection by accessing a protected endpoint
-        """
+        """Test WordPress connection"""
         try:
             test_url = site_url.rstrip('/') + '/wp-json/wp/v2/users/me'
             logger.info(f"Testing WordPress connection to {test_url}")
@@ -365,24 +559,12 @@ class WordPressAPI:
                 roles = user_data.get('roles', [])
                 if not any(role in roles for role in ['administrator', 'editor', 'author']):
                     logger.warning("⚠️ User role may not have media upload permissions!")
-                    logger.warning("   Recommended: author, editor, or administrator")
                 
                 return True
             else:
-                logger.warning(f"WordPress connection test failed: {response.status_code}")
-                logger.warning(f"Response: {response.text[:500]}")
-                
-                if response.status_code == 401:
-                    logger.error("❌ AUTHENTICATION FAILED!")
-                    logger.error("   Check: Username and Application Password are correct")
-                elif response.status_code == 403:
-                    logger.error("❌ PERMISSION DENIED!")
-                    logger.error("   Check: REST API is enabled")
-                
+                logger.error(f"WordPress connection failed: HTTP {response.status_code}")
                 return False
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error during WordPress connection test: {e}")
-            return False
+        
         except Exception as e:
-            logger.error(f"Unexpected error during connection test: {e}")
+            logger.error(f"Error during connection test: {e}")
             return False
