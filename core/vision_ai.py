@@ -34,13 +34,13 @@ class VisionAI:
             # Try to load a lightweight vision model
             try:
                 processor = AutoImageProcessor.from_pretrained(
-            local_files_only=True,
                     "google/vit-base-patch16-224",
+                    local_files_only=True,
                     trust_remote_code=True
                 )
                 model = AutoModelForImageClassification.from_pretrained(
-            local_files_only=True,
                     "google/vit-base-patch16-224",
+                    local_files_only=True,
                     trust_remote_code=True,
                     device_map="cpu"
                 )
