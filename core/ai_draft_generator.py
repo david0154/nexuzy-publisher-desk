@@ -1,6 +1,9 @@
-"""
-AI Draft Generation Module - Full Article Rewriting with AI Model Loading
-Generates complete, professional news articles (1000+ words) with AI sentence improvement
+""" 
+AI Draft Generation Module - Complete Article Rewriting with GGUF Models
+Generates professional news articles (800-1200 words) with AI
+
+REQUIRES: GGUF model file in models/ directory
+NO SAFE MODE - Fails gracefully if model not available
 """
 
 import sqlite3
@@ -16,201 +19,125 @@ from io import BytesIO
 import os
 import sys
 
-
-import threading
-
-class TimeoutException(Exception):
-    pass
-
-def run_with_timeout(func, args=(), kwargs={}, timeout_duration=60):
-    result = [None]
-    exception = [None]
-
-    def worker():
-        try:
-            result[0] = func(*args, **kwargs)
-        except Exception as e:
-            exception[0] = e
-
-    thread = threading.Thread(target=worker)
-    thread.daemon = True
-    thread.start()
-    thread.join(timeout=timeout_duration)
-
-    if thread.is_alive():
-        raise TimeoutException(f"Timeout after {timeout_duration}s")
-    if exception[0]:
-        raise exception[0]
-    return result[0]
-
-
 logger = logging.getLogger(__name__)
 
-def clean_article_text(text):
-    if not text:
-        return text
-
-    # Remove section headings
-    text = re.sub(r'^(Background|Main Content|Analysis|Conclusion):\s*', '', text, flags=re.MULTILINE|re.IGNORECASE)
-    text = re.sub(r'\n(Background|Main Content|Analysis|Conclusion):\s*\n', '\n\n', text, flags=re.IGNORECASE)
-
-    # Remove markdown headings
-    text = re.sub(r'^##\s*(Background|Main Content|Analysis|Conclusion)\s*$', '', text, flags=re.MULTILINE|re.IGNORECASE)
-
-    # Remove image URLs
-    text = re.sub(r'\[IMAGE:[^\]]+\]', '', text)
-    text = re.sub(r'https?://[^\s<>"]+\.(jpg|jpeg|png|gif|webp)', '', text)
-
-    # Clean whitespace
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    text = text.strip()
-
-    return text
-
-
-
-import threading
-
-def generate_with_timeout(llm_func, prompt, timeout_sec=120):
-    result = {'text': None, 'error': None}
-
-    def worker():
-        try:
-            result['text'] = llm_func(
-                prompt,
-                max_new_tokens=512,
-                temperature=0.7,
-                top_p=0.9,
-                stop=["</s>", "[/INST]"],
-                stream=False
-            )
-        except Exception as e:
-            result['error'] = e
-
-    t = threading.Thread(target=worker)
-    t.daemon = True
-    t.start()
-    t.join(timeout=timeout_sec)
-
-    if t.is_alive():
-        raise TimeoutError(f"Generation timeout ({timeout_sec}s)")
-    if result['error']:
-        raise result['error']
-    return result['text']
-
-
-
 class DraftGenerator:
-    """Generate complete AI-rewritten news articles with sentence-level AI improvement"""
+    """Generate complete AI-rewritten news articles with GGUF models"""
     
-    def __init__(self, db_path: str, model_name: str = 'models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf'):
+    def __init__(self, db_path: str, model_name: str = 'models/tinyllama-1.1b-chat-v1.0.Q8_0.gguf'):
         self.db_path = db_path
         self.model_name = model_name
-        self.model_file = "tinyllama-1.1b-chat-v1.0.Q8_0.gguf"
+        self.model_file = Path(model_name).name  # Extract filename from path
         self.llm = self._load_model()
         self.translation_keywords = self._load_translation_keywords()
         
-        # Initialize sentence improvement model (lighter weight for quick improvements)
+        # Initialize sentence improvement model (optional, non-blocking)
         self.sentence_model = self._load_sentence_model()
         
-        # Model status
+        # Model status - FAIL if model not loaded
         if not self.llm:
-            logger.warning("⚠️  AI Writer in SAFE MODE - Using template-based generation")
-            logger.warning("📥 Download GGUF model for full AI features")
+            logger.error("❌ AI Writer FAILED - GGUF model not found")
+            logger.error("📥 Download model from: https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF")
+            logger.error("💡 Place model file in: models/ directory")
+            logger.error("⚠️  NO SAFE MODE - Article generation will FAIL without model")
         else:
             logger.info("✅ AI Writer LOADED - Full AI generation enabled")
     
     def _load_model(self):
-        """Load GGUF quantized Mistral model with safe fallback"""
+        """Load GGUF quantized model - NO FALLBACK"""
         try:
             from ctransformers import AutoModelForCausalLM
             
             logger.info(f"Loading GGUF model: {self.model_name}")
             
             # Check multiple possible paths (cross-platform compatible)
-            model_name_safe = self.model_name.replace('/', '_')
             possible_paths = [
-                Path('models') / model_name_safe / self.model_file,
-                Path('models') / self.model_file,
-                Path(self.model_file),
-                Path.home() / '.cache' / 'nexuzy' / 'models' / model_name_safe / self.model_file
+                Path(self.model_name),  # Direct path provided
+                Path('models') / self.model_file,  # models/filename
+                Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,  # User cache
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',  # Explicit fallback
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',  # Alternative quant
             ]
             
             model_path = None
             for path in possible_paths:
                 if path.exists():
                     model_path = path
-                    logger.info(f"Found model at: {model_path}")
+                    logger.info(f"✅ Found model at: {model_path}")
                     break
             
             if not model_path:
-                logger.warning(f"⚠️  GGUF model not found. Checked paths:")
+                logger.error(f"❌ GGUF model not found. Checked paths:")
                 for p in possible_paths:
-                    logger.warning(f"  - {p}")
-                logger.warning("📥 Download from: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/blob/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf")
-                logger.warning("💡 Place in: models/ folder")
-                logger.warning("✅ App continues in SAFE MODE with template generation")
+                    logger.error(f"  ✗ {p}")
                 return None
             
-            logger.info(f"Loading GGUF model from: {model_path}")
+            logger.info(f"⏳ Loading GGUF model from: {model_path} (this may take 10-30 seconds)...")
             
             # Load GGUF model with ctransformers
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type='llama',
-                context_length=1024,
-                max_new_tokens=512,
-                threads=4,  # Auto-detect CPU cores
-                gpu_layers=0
+                context_length=2048,  # Increased for longer articles
+                max_new_tokens=1200,
+                threads=4,  # Use more CPU threads
+                gpu_layers=0  # CPU only
             )
             
-            logger.info(f"✅ TinyLlama Q8_0 loaded successfully")
+            logger.info(f"✅ GGUF model loaded successfully: {model_path.name}")
             return llm
         
         except ImportError:
-            logger.warning("⚠️  ctransformers not installed. Install: pip install ctransformers")
-            logger.warning("✅ App continues in SAFE MODE with template generation")
+            logger.error("❌ ctransformers not installed")
+            logger.error("📥 Install: pip install ctransformers")
             return None
         except Exception as e:
-            logger.warning(f"⚠️  Error loading GGUF model: {e}")
-            logger.warning("✅ App continues in SAFE MODE with template generation")
+            logger.error(f"❌ Error loading GGUF model: {e}")
             return None
     
     def _load_sentence_model(self):
-        """Load lightweight sentence improvement model"""
+        """Load lightweight sentence improvement model (non-blocking, optional)"""
         try:
             from transformers import pipeline
-            logger.info("Loading sentence improvement model...")
-            model = pipeline("text2text-generation", model="google/flan-t5-base", max_length=150)
+            logger.info("Loading sentence improvement model (flan-t5-base)...")
+            
+            # Try with timeout handling
+            model = pipeline(
+                "text2text-generation",
+                model="google/flan-t5-base",
+                max_length=150,
+                device=-1  # CPU only
+            )
             logger.info("✅ Sentence improvement model loaded")
             return model
         except Exception as e:
-            logger.warning(f"⚠️  Sentence model unavailable: {e}")
+            logger.warning(f"⚠️  Sentence model unavailable (network timeout or error): {e}")
+            logger.info("💡 App will use rule-based sentence improvement")
             return None
     
     def improve_sentence(self, sentence: str) -> str:
         """
-        Improve a single sentence with AI
-        This is used by the WYSIWYG editor's "🤖 Improve Sentence" button
+        Improve a single sentence with AI or rule-based enhancement
+        Used by WYSIWYG editor's "🤖 Improve Sentence" button
         """
         if not sentence or len(sentence.strip()) < 10:
             return sentence
         
-        # If AI model available, use it
+        # Try AI model if available
         if self.sentence_model:
             try:
                 prompt = f"Rewrite this sentence to be more professional and clear: {sentence}"
                 result = self.sentence_model(prompt, max_length=150, do_sample=False)
                 improved = result[0]['generated_text'].strip()
-                logger.info(f"AI improved sentence: {sentence[:50]}... -> {improved[:50]}...")
+                logger.info(f"AI improved: {sentence[:40]}... → {improved[:40]}...")
                 return improved
             except Exception as e:
                 logger.error(f"Sentence improvement error: {e}")
         
-        # Fallback: Manual improvement rules
+        # Fallback: Rule-based improvement
         improved = sentence.strip()
         
-        # Basic improvements
+        # Add period if missing
         if not improved.endswith(('.', '!', '?')):
             improved += '.'
         
@@ -221,7 +148,7 @@ class DraftGenerator:
         # Remove multiple spaces
         improved = re.sub(r'\s+', ' ', improved)
         
-        # Replace common informal words
+        # Replace informal words
         replacements = {
             'gonna': 'going to',
             'wanna': 'want to',
@@ -306,7 +233,7 @@ class DraftGenerator:
     
     def download_and_store_image(self, image_url: str, news_id: int) -> Optional[str]:
         """
-        Download image from URL, verify no watermark, and store locally
+        Download image from URL and store locally
         Returns local file path or None
         """
         if not image_url:
@@ -337,7 +264,7 @@ class DraftGenerator:
             
             # Save image
             img.save(filepath)
-            logger.info(f"✅ Image downloaded and saved: {filepath}")
+            logger.info(f"✅ Image downloaded: {filepath}")
             
             return str(filepath)
         
@@ -346,12 +273,22 @@ class DraftGenerator:
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
-        logger.info(f"Starting draft generation for news_id {news_id}")
         """
-        Generate complete article draft with AI or template-based fallback
-        SAFE MODE: Falls back to template generation if model unavailable
+        Generate complete article draft with AI - NO FALLBACK MODE
+        Fails if AI model not available
         """
         try:
+            # Check if model is loaded
+            if not self.llm:
+                error_msg = "❌ AI model not loaded. Cannot generate article. Download GGUF model first."
+                logger.error(error_msg)
+                return {
+                    'error': error_msg,
+                    'title': '',
+                    'body_draft': '',
+                    'word_count': 0
+                }
+            
             # Get news details
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -363,7 +300,8 @@ class DraftGenerator:
             
             news = cursor.fetchone()
             if not news:
-                return {}
+                conn.close()
+                return {'error': 'News not found'}
             
             headline, summary, source_url, source_domain, category, image_url = news
             
@@ -372,7 +310,7 @@ class DraftGenerator:
             workspace_id = cursor.fetchone()[0]
             conn.close()
             
-            # Download and store image locally
+            # Download and store image locally (optional)
             local_image_path = None
             if image_url:
                 local_image_path = self.download_and_store_image(image_url, news_id)
@@ -380,18 +318,12 @@ class DraftGenerator:
             # Extract topic information
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
-            # Generate or enhance content
-            if manual_mode and manual_content:
-                draft = self._enhance_manual_content(manual_content, headline, category, topic_info)
-            elif self.llm:
-                draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
-            else:
-                # SAFE MODE: Template-based generation
-                logger.info("Using template-based generation (SAFE MODE)")
-                draft = self._generate_template_based(headline, summary, category, topic_info)
+            # Generate with AI model (REQUIRED)
+            logger.info(f"🤖 Generating article with AI for: {headline[:50]}...")
+            draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             
-            # Embed image properly in article (local path, not URL)
-            draft['image_url'] = image_url or ''
+            # Store original image URL for WordPress upload
+            draft['image_url'] = image_url or ''  # IMPORTANT: Keep original URL
             draft['local_image_path'] = local_image_path or ''
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
@@ -400,213 +332,117 @@ class DraftGenerator:
             # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"✅ Generated draft for news_id {news_id}, words: {draft.get('word_count', 0)}")
+            logger.info(f"✅ Generated draft {draft_id} for news_id {news_id}, words: {draft.get('word_count', 0)}")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
             logger.error(f"❌ Error generating draft: {e}")
-            return {}
-    
-    def _generate_template_based(self, headline: str, summary: str, category: str, topic_info: Dict) -> Dict:
-        """
-        Template-based draft generation for SAFE MODE
-        Creates professional articles without requiring AI model
-        """
-        logger.info("Generating template-based article (SAFE MODE)")
-        
-        # Extract key information
-        capitalized = topic_info.get('capitalized_terms', [])
-        numbers = topic_info.get('numbers', [])
-        focus = topic_info.get('focus', category)
-        
-        # Build article sections
-        sections = []
-        
-        # Introduction
-        intro = f"<h2>Introduction</h2>\n<p>{headline} - This {category.lower()} development has gained significant attention. "
-        if summary:
-            intro += f"{summary[:200]}..."
-        intro += "</p>"
-        sections.append(intro)
-        
-        # Background
-        background = f"<h2>Background</h2>\n<p>This story relates to recent developments in {focus}. "
-        if capitalized:
-            background += f"Key entities involved include {', '.join(capitalized[:3])}. "
-        if numbers:
-            background += f"Notable figures mentioned include {', '.join(numbers[:3])}."
-        background += "</p>"
-        sections.append(background)
-        
-        # Main Content
-        main = f"<h2>Key Details</h2>\n<p>{summary or 'This development represents a significant event in the ' + category.lower() + ' sector.'}</p>"
-        sections.append(main)
-        
-        # Analysis
-        analysis = f"<h2>Analysis</h2>\n<p>Industry experts are closely monitoring this situation. "
-        analysis += f"The implications for {focus} remain to be fully understood as more information becomes available.</p>"
-        sections.append(analysis)
-        
-        # Note about template generation
-        # Template note removed
-        
-        body = "\n\n".join(sections)
-        
-        return {
-            'title': headline,
-            'body_draft': body,
-            'summary': summary or '',
-            'word_count': len(body.split()),
-            'is_template_generated': True,
-            'generation_mode': 'template'
-        }
-    
-    def _enhance_manual_content(self, content: str, headline: str, category: str, topic_info: Dict) -> Dict:
-        """Enhance user-written content with AI sentence improvement"""
-        logger.info("Enhancing manual content")
-        
-        # Structure the content
-        structured_content = self._structure_content(content, topic_info)
-        
-        # Enhance sentences
-        enhanced = self._enhance_sentences(structured_content, topic_info)
-        
-        return {
-            'title': headline,
-            'body_draft': enhanced,
-            'summary': topic_info.get('summary', ''),
-            'word_count': len(enhanced.split()),
-            'is_manual_enhanced': True
-        }
-    
-    def _structure_content(self, content: str, topic_info: Dict) -> str:
-        """Structure user content with proper formatting"""
-        lines = content.split('\n')
-        structured_parts = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            if len(line) < 100 and line.isupper():
-                structured_parts.append(f"\n<h2>{line}</h2>\n")
-            else:
-                structured_parts.append(f"<p>{line}</p>")
-        
-        return "\n".join(structured_parts)
-    
-    def _enhance_sentences(self, text: str, topic_info: Dict) -> str:
-        """Enhance sentences for better readability"""
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        enhanced_sentences = []
-        
-        for sentence in sentences:
-            if not sentence.strip():
-                continue
-            
-            # Use AI improvement if available
-            if len(sentence.split()) < 8 and self.sentence_model:
-                enhanced = self.improve_sentence(sentence)
-                enhanced_sentences.append(enhanced)
-            else:
-                enhanced_sentences.append(sentence)
-        
-        return " ".join(enhanced_sentences)
+            import traceback
+            logger.error(traceback.format_exc())
+            return {'error': str(e)}
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate with AI model - optimized for speed"""
-        """Generate with real AI model"""
+        """Generate complete article with AI model - FIXED PROMPT AND PARAMETERS"""
         
-        topic_context = f"""Topic Focus: {topic_info['focus']}
+        topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
-Key Numbers: {', '.join(topic_info['numbers'][:3])}"""
+Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
-        prompt = f"""<s>[INST] You are a professional journalist. Write a complete, detailed news article (1000-1200 words) based on this headline.
-
-Write in professional journalism style with clear sections.
-Include: Introduction, Background, Main Content, and Analysis.
-
-IMPORTANT RULES:
-- DO NOT add conclusions or summary sections
-- DO NOT add risk assessments
-- DO NOT add "final thoughts" or "looking ahead" sections
-- DO NOT mention AI, bots, or automated systems
-- STOP after completing the main analysis section
+        # IMPROVED PROMPT - Natural article structure
+        prompt = f"""<s>[INST] You are a professional journalist. Write a complete, detailed news article (800-1200 words) based on this headline.
 
 Headline: {headline}
 Summary: {summary}
 
 {topic_context}
 
-Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
+Write in professional journalism style with these sections:
+1. Introduction (lead paragraph)
+2. Background and context
+3. Key details and facts
+4. Analysis and implications
+5. Future outlook (brief)
+
+Rules:
+- Be factual, objective, and professional
+- Use clear, journalistic language
+- Include relevant details from the summary
+- Do not mention AI, bots, or automation
+- Write naturally without meta-commentary
+
+Write the complete article now:[/INST]"""
         
         try:
-            def _run_generation():
-                return self.llm(
-                    prompt,
-                    max_new_tokens=512,
-                    temperature=0.7,
-                    top_p=0.9,
-                    stop=["</s>", "[/INST]", "Conclusion"],
-                    stream=False
-                )
-
-            try:
-                logger.info("🤖 Starting AI generation (60s timeout)...")
-                generated_text = run_with_timeout(_run_generation, timeout_duration=60)
-                logger.info("✅ Generation completed")
-            except TimeoutException:
-                logger.warning("⚠️  Timeout - using template fallback")
-                return self._generate_template_based(headline, summary, category, topic_info)
-            except Exception as e:
-                logger.error(f"⚠️  Error: {e} - using template fallback")
-                return self._generate_template_based(headline, summary, category, topic_info)
-
-            # generated_text now contains result
+            logger.info("⏳ Generating with AI model (30-60 seconds)...")
             
-            # Remove any conclusion or risk sections that might have been generated
-            cleaned_text = self._remove_unwanted_sections(generated_text)
+            generated_text = self.llm(
+                prompt,
+                max_new_tokens=1200,  # INCREASED from 512
+                temperature=0.7,       # Slightly creative
+                top_p=0.95,            # Better diversity
+                repetition_penalty=1.15,  # Reduce repetition
+                stop=["</s>", "[INST]", "[/INST]"],  # REMOVED aggressive stops
+                stream=False
+            )
+            
+            # Clean the generated text
+            cleaned_text = self._clean_generated_text(generated_text)
+            
+            # Convert to HTML
+            html_content = self._convert_to_html(cleaned_text)
+            
+            word_count = len(cleaned_text.split())
+            logger.info(f"✅ AI generated {word_count} words")
             
             return {
                 'title': headline,
-                'body_draft': cleaned_text.strip(),
+                'body_draft': html_content,
                 'summary': summary,
-                'word_count': len(cleaned_text.split()),
+                'word_count': word_count,
                 'is_ai_generated': True,
                 'generation_mode': 'ai_model'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
-            logger.info("Falling back to template generation")
-            return self._generate_template_based(headline, summary, category, topic_info)
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                'error': f"AI generation failed: {str(e)}",
+                'title': headline,
+                'body_draft': '',
+                'summary': summary,
+                'word_count': 0
+            }
     
-    def _remove_unwanted_sections(self, text: str) -> str:
-        """Remove conclusion, risk assessment, summary sections"""
-        unwanted_patterns = [
-            r'## Conclusion.*$',
-            r'## Risk.*$',
-            r'## Summary.*$',
-            r'## Final.*$',
-            r'## Looking Ahead.*$',
-            r'\n\nConclusion:.*$',
-            r'\n\nRisk.*:.*$',
-            r'\n\nSummary:.*$',
-            r'\n\nFinal Thoughts.*$',
-            r'\n\nLooking Ahead.*$',
-            r'\n\n---\n\n.*Conclusion.*$',
-            r'\n\n\*\*Conclusion\*\*.*$',
-            r'\n\n\*\*Risk.*\*\*.*$',
-            r'\n\n\*\*Summary\*\*.*$',
+    def _clean_generated_text(self, text: str) -> str:
+        """Clean and format AI-generated text"""
+        # Remove unwanted disclaimers
+        unwanted_phrases = [
+            "Note: This article",
+            "Disclaimer:",
+            "Generated by",
+            "AI-generated",
+            "[This article",
+            "This content was",
+            "As an AI",
+            "I cannot",
+            "I apologize"
         ]
         
         cleaned = text
-        for pattern in unwanted_patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        for phrase in unwanted_phrases:
+            if phrase in cleaned:
+                pos = cleaned.find(phrase)
+                if pos > 200:  # Only cut if substantial content exists
+                    cleaned = cleaned[:pos].strip()
+                    break
         
+        # Clean up formatting
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)  # Max 2 newlines
+        cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned, flags=re.MULTILINE)  # Remove bullets
         cleaned = cleaned.strip()
-        logger.info("✅ Removed unwanted sections")
+        
         return cleaned
     
     def _check_column_exists(self, cursor, table: str, column: str) -> bool:
@@ -617,17 +453,16 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             return column in columns
         except Exception:
             return False
-
+    
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
         """Store draft in database with HTML format"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Convert to HTML
-            html_body = self._convert_to_html(draft.get('body_draft', ''))
+            html_body = draft.get('body_draft', '')
             
-            # Embed local image in HTML if available
+            # Embed local image in HTML if available (for preview)
             if draft.get('local_image_path'):
                 image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
                 html_body = image_html + html_body
@@ -641,11 +476,11 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
                 html_body,
                 draft.get('summary', ''),
                 draft.get('word_count', 0),
-                draft.get('local_image_path', ''),
+                draft.get('image_url', ''),  # Store original URL for WordPress
                 draft.get('source_url', ''),
                 datetime.now().isoformat()
             ]
-
+            
             # Optional columns
             if self._check_column_exists(cursor, 'ai_drafts', 'source_domain'):
                 columns.append('source_domain')
@@ -658,7 +493,7 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             if self._check_column_exists(cursor, 'ai_drafts', 'generation_mode'):
                 columns.append('generation_mode')
                 values.append(draft.get('generation_mode', 'unknown'))
-
+            
             placeholders = ', '.join(['?' for _ in values])
             column_names = ', '.join(columns)
             
@@ -679,22 +514,41 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             return 0
     
     def _convert_to_html(self, text: str) -> str:
-        """Convert markdown-style text to HTML"""
-        # Convert headers
-        text = re.sub(r'^## (.+)$', r'<h2>\1</h2>', text, flags=re.MULTILINE)
-        text = re.sub(r'^### (.+)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
+        """Convert plain text / markdown to proper HTML"""
+        lines = text.split('\n')
+        html_parts = []
+        current_paragraph = []
         
-        # Convert paragraphs
-        paragraphs = text.split('\n\n')
-        html_paragraphs = []
-        for para in paragraphs:
-            if not para.strip():
+        for line in lines:
+            line = line.strip()
+            
+            if not line:
+                # Empty line - end current paragraph
+                if current_paragraph:
+                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    current_paragraph = []
                 continue
-            if not para.strip().startswith('<'):
-                para = f'<p>{para.strip()}</p>'
-            html_paragraphs.append(para)
+            
+            # Check if it's a heading
+            if line.startswith('##'):
+                if current_paragraph:
+                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    current_paragraph = []
+                html_parts.append(f"<h2>{line.replace('##', '').strip()}</h2>")
+            elif line.isupper() and len(line) < 60 and len(line.split()) > 1:
+                if current_paragraph:
+                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    current_paragraph = []
+                html_parts.append(f"<h2>{line.title()}</h2>")
+            else:
+                # Regular text - add to paragraph
+                current_paragraph.append(line)
         
-        return '\n'.join(html_paragraphs)
+        # Add final paragraph
+        if current_paragraph:
+            html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+        
+        return '\n\n'.join(html_parts)
     
     def cleanup_old_queue(self, days: int = 15):
         """Remove news items older than specified days from queue"""
@@ -704,10 +558,11 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
             
             cutoff_date = datetime.now() - timedelta(days=days)
             
+            # FIXED: Use fetched_at instead of created_at (column doesn't exist)
             cursor.execute('''
                 UPDATE news_queue
                 SET status = 'archived'
-                WHERE created_at < ? AND status = 'pending'
+                WHERE fetched_at < ? AND status = 'pending'
             ''', (cutoff_date.isoformat(),))
             
             conn.commit()
