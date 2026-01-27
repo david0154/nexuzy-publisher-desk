@@ -16,7 +16,89 @@ from io import BytesIO
 import os
 import sys
 
+
+import threading
+
+class TimeoutException(Exception):
+    pass
+
+def run_with_timeout(func, args=(), kwargs={}, timeout_duration=60):
+    result = [None]
+    exception = [None]
+
+    def worker():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+
+    thread = threading.Thread(target=worker)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout=timeout_duration)
+
+    if thread.is_alive():
+        raise TimeoutException(f"Timeout after {timeout_duration}s")
+    if exception[0]:
+        raise exception[0]
+    return result[0]
+
+
 logger = logging.getLogger(__name__)
+
+def clean_article_text(text):
+    if not text:
+        return text
+
+    # Remove section headings
+    text = re.sub(r'^(Background|Main Content|Analysis|Conclusion):\s*', '', text, flags=re.MULTILINE|re.IGNORECASE)
+    text = re.sub(r'\n(Background|Main Content|Analysis|Conclusion):\s*\n', '\n\n', text, flags=re.IGNORECASE)
+
+    # Remove markdown headings
+    text = re.sub(r'^##\s*(Background|Main Content|Analysis|Conclusion)\s*$', '', text, flags=re.MULTILINE|re.IGNORECASE)
+
+    # Remove image URLs
+    text = re.sub(r'\[IMAGE:[^\]]+\]', '', text)
+    text = re.sub(r'https?://[^\s<>"]+\.(jpg|jpeg|png|gif|webp)', '', text)
+
+    # Clean whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+
+    return text
+
+
+
+import threading
+
+def generate_with_timeout(llm_func, prompt, timeout_sec=120):
+    result = {'text': None, 'error': None}
+
+    def worker():
+        try:
+            result['text'] = llm_func(
+                prompt,
+                max_new_tokens=512,
+                temperature=0.7,
+                top_p=0.9,
+                stop=["</s>", "[/INST]"],
+                stream=False
+            )
+        except Exception as e:
+            result['error'] = e
+
+    t = threading.Thread(target=worker)
+    t.daemon = True
+    t.start()
+    t.join(timeout=timeout_sec)
+
+    if t.is_alive():
+        raise TimeoutError(f"Generation timeout ({timeout_sec}s)")
+    if result['error']:
+        raise result['error']
+    return result['text']
+
+
 
 class DraftGenerator:
     """Generate complete AI-rewritten news articles with sentence-level AI improvement"""
@@ -77,12 +159,12 @@ class DraftGenerator:
                 str(model_path),
                 model_type='llama',
                 context_length=1024,
-                max_new_tokens=800,
-                threads=2,  # Auto-detect CPU cores
+                max_new_tokens=512,
+                threads=4,  # Auto-detect CPU cores
                 gpu_layers=0
             )
             
-            logger.info("✅ Mistral-7B-GGUF Q4_K_M loaded successfully (4.1GB)")
+            logger.info(f"✅ TinyLlama Q8_0 loaded successfully")
             return llm
         
         except ImportError:
@@ -264,6 +346,7 @@ class DraftGenerator:
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
+        logger.info(f"Starting draft generation for news_id {news_id}")
         """
         Generate complete article draft with AI or template-based fallback
         SAFE MODE: Falls back to template generation if model unavailable
@@ -365,9 +448,9 @@ class DraftGenerator:
         sections.append(analysis)
         
         # Note about template generation
-        template_note = "\n<p><em>Note: This article was generated using template-based content generation. For full AI-powered drafts, download the Mistral-7B GGUF model.</em></p>"
+        # Template note removed
         
-        body = "\n\n".join(sections) + template_note
+        body = "\n\n".join(sections)
         
         return {
             'title': headline,
@@ -460,14 +543,28 @@ Summary: {summary}
 Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
         
         try:
-            generated_text = self.llm(
-                prompt,
-                max_new_tokens=800,
-                temperature=0.6,
-                top_p=0.9,
-                stop=["</s>", "[/INST]", "Conclusion", "Risk Assessment", "Summary", "Final Thoughts", "Looking Ahead"],
-                stream=False
-            )
+            def _run_generation():
+                return self.llm(
+                    prompt,
+                    max_new_tokens=512,
+                    temperature=0.7,
+                    top_p=0.9,
+                    stop=["</s>", "[/INST]", "Conclusion"],
+                    stream=False
+                )
+
+            try:
+                logger.info("🤖 Starting AI generation (60s timeout)...")
+                generated_text = run_with_timeout(_run_generation, timeout_duration=60)
+                logger.info("✅ Generation completed")
+            except TimeoutException:
+                logger.warning("⚠️  Timeout - using template fallback")
+                return self._generate_template_based(headline, summary, category, topic_info)
+            except Exception as e:
+                logger.error(f"⚠️  Error: {e} - using template fallback")
+                return self._generate_template_based(headline, summary, category, topic_info)
+
+            # generated_text now contains result
             
             # Remove any conclusion or risk sections that might have been generated
             cleaned_text = self._remove_unwanted_sections(generated_text)
