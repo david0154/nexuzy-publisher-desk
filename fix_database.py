@@ -1,6 +1,6 @@
 """
-Quick Database Fix Script
-Fixes the 'no such column: source_domain' error by adding missing columns
+Enhanced Database Fix Script
+Fixes database schema errors including created_at column
 """
 
 import sqlite3
@@ -21,7 +21,7 @@ def fix_database():
         return False
     
     logger.info("="*60)
-    logger.info("NEXUZY PUBLISHER DESK - DATABASE FIX")
+    logger.info("NEXUZY PUBLISHER DESK - ENHANCED DATABASE FIX")
     logger.info("="*60)
     logger.info(f"Fixing database: {DB_PATH}")
     logger.info("")
@@ -37,7 +37,7 @@ def fix_database():
         logger.info(f"Current ai_drafts columns: {', '.join(columns)}")
         logger.info("")
         
-        # Columns that need to be added
+        # Columns that need to be added (INCLUDING created_at)
         required_columns = {
             'source_url': 'TEXT',
             'source_domain': 'TEXT',
@@ -45,7 +45,8 @@ def fix_database():
             'summary': 'TEXT',
             'headline_suggestions': 'TEXT',
             'is_html': 'BOOLEAN DEFAULT 1',
-            'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+            'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+            'generated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
         }
         
         fixes_applied = 0
@@ -93,6 +94,32 @@ def fix_database():
             else:
                 logger.info(f"✓ Column already exists: {column_name}")
         
+        # Check translations table
+        cursor.execute("PRAGMA table_info(translations)")
+        trans_columns = [col[1] for col in cursor.fetchall()]
+        
+        logger.info("")
+        logger.info(f"Current translations columns: {', '.join(trans_columns)}")
+        logger.info("")
+        
+        trans_required = {
+            'summary': 'TEXT'
+        }
+        
+        for column_name, column_type in trans_required.items():
+            if column_name not in trans_columns:
+                try:
+                    sql = f"ALTER TABLE translations ADD COLUMN {column_name} {column_type}"
+                    logger.info(f"Adding missing column to translations: {column_name}")
+                    cursor.execute(sql)
+                    conn.commit()
+                    logger.info(f"✅ Successfully added: {column_name}")
+                    fixes_applied += 1
+                except Exception as e:
+                    logger.error(f"❌ Error adding {column_name}: {e}")
+            else:
+                logger.info(f"✓ Column already exists: {column_name}")
+        
         conn.close()
         
         logger.info("")
@@ -103,14 +130,20 @@ def fix_database():
             logger.info("✅ DATABASE IS ALREADY UP TO DATE!")
         logger.info("="*60)
         logger.info("")
-        logger.info("The 'no such column: source_domain' error should now be fixed.")
-        logger.info("You can now run: python main.py")
+        logger.info("All database schema errors should now be fixed:")
+        logger.info("  ✓ 'no such column: created_at' - FIXED")
+        logger.info("  ✓ 'no such column: source_domain' - FIXED")
+        logger.info("  ✓ 'no such column: summary' - FIXED")
+        logger.info("")
+        logger.info("✅ You can now run: python main.py")
         logger.info("")
         
         return True
         
     except Exception as e:
         logger.error(f"❌ Error fixing database: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         logger.error("")
         logger.error("If this error persists, you may need to:")
         logger.error("1. Backup your nexuzy.db file")
