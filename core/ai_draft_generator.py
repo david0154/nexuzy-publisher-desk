@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 class DraftGenerator:
     """Generate complete AI-rewritten news articles with sentence-level AI improvement"""
     
-    def __init__(self, db_path: str, model_name: str = 'TheBloke/Mistral-7B-Instruct-v0.2-GGUF'):
+    def __init__(self, db_path: str, model_name: str = 'models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf'):
         self.db_path = db_path
         self.model_name = model_name
-        self.model_file = 'mistral-7b-instruct-v0.2.Q4_K_M.gguf'
+        self.model_file = "tinyllama-1.1b-chat-v1.0.Q8_0.gguf"
         self.llm = self._load_model()
         self.translation_keywords = self._load_translation_keywords()
         
@@ -75,10 +75,10 @@ class DraftGenerator:
             # Load GGUF model with ctransformers
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
-                model_type='mistral',
-                context_length=4096,
-                max_new_tokens=1500,
-                threads=min(4, os.cpu_count() or 4),  # Auto-detect CPU cores
+                model_type='llama',
+                context_length=1024,
+                max_new_tokens=800,
+                threads=2,  # Auto-detect CPU cores
                 gpu_layers=0
             )
             
@@ -432,6 +432,7 @@ class DraftGenerator:
         return " ".join(enhanced_sentences)
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
+        """Generate with AI model - optimized for speed"""
         """Generate with real AI model"""
         
         topic_context = f"""Topic Focus: {topic_info['focus']}
@@ -461,8 +462,8 @@ Write the COMPLETE article now (END after analysis, NO conclusions): [/INST]"""
         try:
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=1500,
-                temperature=0.7,
+                max_new_tokens=800,
+                temperature=0.6,
                 top_p=0.9,
                 stop=["</s>", "[/INST]", "Conclusion", "Risk Assessment", "Summary", "Final Thoughts", "Looking Ahead"],
                 stream=False
