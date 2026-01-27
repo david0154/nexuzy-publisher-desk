@@ -322,6 +322,17 @@ class DraftGenerator:
             logger.info(f"🤖 Generating article with AI for: {headline[:50]}...")
             draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             
+            # Check if generation failed
+            if 'error' in draft or not draft.get('body_draft'):
+                error_msg = draft.get('error', 'AI generation returned empty content')
+                logger.error(f"❌ Generation failed: {error_msg}")
+                return {
+                    'error': error_msg,
+                    'title': headline,
+                    'body_draft': '',
+                    'word_count': 0
+                }
+            
             # Store original image URL for WordPress upload
             draft['image_url'] = image_url or ''  # IMPORTANT: Keep original URL
             draft['local_image_path'] = local_image_path or ''
@@ -386,14 +397,51 @@ Write the complete article now:[/INST]"""
                 stream=False
             )
             
+            # CRITICAL FIX: Check if generated_text is valid
+            if not generated_text or not isinstance(generated_text, str):
+                logger.error(f"❌ Model returned invalid output: {type(generated_text)}")
+                return {
+                    'error': 'AI model returned empty or invalid response',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
+            
+            generated_text = str(generated_text).strip()
+            
+            if not generated_text or len(generated_text) < 100:
+                logger.error(f"❌ Model generated too little text: {len(generated_text)} chars")
+                logger.error(f"Generated text: {generated_text[:200]}")
+                return {
+                    'error': f'AI generated only {len(generated_text)} characters (need 800+ words)',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
+            
             # Clean the generated text
             cleaned_text = self._clean_generated_text(generated_text)
+            
+            if not cleaned_text or len(cleaned_text) < 100:
+                logger.error(f"❌ Cleaned text too short: {len(cleaned_text)} chars")
+                return {
+                    'error': 'AI generated text was removed during cleaning',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
             
             # Convert to HTML
             html_content = self._convert_to_html(cleaned_text)
             
             word_count = len(cleaned_text.split())
             logger.info(f"✅ AI generated {word_count} words")
+            
+            if word_count < 100:
+                logger.warning(f"⚠️  Word count very low: {word_count}")
             
             return {
                 'title': headline,
