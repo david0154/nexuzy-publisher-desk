@@ -13,6 +13,7 @@ ctransformers>=0.2.27
 
 # PyTorch - Compatible with NumPy 1.x
 torch>=2.1.0,<2.5.0
+torchvision==0.16.2
 
 # HuggingFace model downloads
 huggingface_hub>=0.19.4
@@ -22,9 +23,11 @@ feedparser>=6.0.10
 requests>=2.31.0
 beautifulsoup4>=4.12.2
 lxml>=4.9.3
+python-dateutil==2.8.2
 
 # UI
 pillow>=10.1.0
+opencv-python==4.9.0.80
 
 # Database (sqlite3 is built-in)
 
@@ -38,3 +41,8 @@ colorama>=0.4.6
 # Translation support (optional)
 sentencepiece>=0.1.99
 sacremoses>=0.0.53
+protobuf==4.25.2
+
+# ===== WEB/API =====
+requests-toolbelt==1.0.0
+wptools==0.1.2
