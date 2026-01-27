@@ -1,46 +1,90 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 Nexuzy Publisher Desk - PyInstaller Spec File
-Builds standalone Windows executable with bundled AI model
+Builds standalone Windows executable with:
+- GGUF models (Mistral 7B)
+- Sentence Transformer models (all-MiniLM-L6-v2)
+- All Python dependencies
 
 Usage:
     pyinstaller --clean --noconfirm nexuzy_installer.spec
-
-Requirements:
-    - All dependencies from requirements.txt
-    - GGUF model in models/ directory (optional)
-    - Icon file in resources/logo.ico (optional)
 """
 
 import sys
 from pathlib import Path
+import os
 
 block_cipher = None
 
 # Collect data files
 datas = []
 
+print("\n" + "="*60)
+print("NEXUZY PUBLISHER DESK - BUILD CONFIGURATION")
+print("="*60)
+
 # Resources (icons, images, etc.)
 if Path('resources').exists():
     datas.append(('resources', 'resources'))
-    print("[BUILD] Including resources/")
+    print("[BUILD] ✅ Including resources/")
 
-# AI Models (if available) - OPTIONAL
-if Path('models').exists() and any(Path('models').glob('*.gguf')):
-    datas.append(('models', 'models'))
-    print("[BUILD] Including AI models/")
-    
-    # Calculate model size
-    total_size = sum(f.stat().st_size for f in Path('models').glob('*.gguf'))
-    print(f"[BUILD] Model size: {total_size / (1024**3):.2f} GB")
+# ===== AI MODELS =====
+
+# 1. GGUF Models (Mistral 7B for draft generation)
+if Path('models').exists():
+    gguf_files = list(Path('models').glob('*.gguf'))
+    if gguf_files:
+        datas.append(('models', 'models'))
+        total_size = sum(f.stat().st_size for f in gguf_files)
+        print(f"[BUILD] ✅ Including GGUF models: {len(gguf_files)} files ({total_size / (1024**3):.2f} GB)")
+        for f in gguf_files:
+            print(f"        - {f.name} ({f.stat().st_size / (1024**3):.2f} GB)")
+    else:
+        print("[BUILD] ⚠️  No GGUF models found in models/")
 else:
-    print("[BUILD] WARNING: No AI models found in models/")
-    print("[BUILD] Users will need to download models separately")
+    print("[BUILD] ⚠️  models/ directory not found")
+
+# 2. Sentence Transformer Models (for embeddings/similarity)
+sentence_transformer_models = [
+    'models/models--sentence-transformers--all-MiniLM-L6-v2',
+    'models/sentence-transformers_all-MiniLM-L6-v2',
+    'models/sentence-transformers',  # Any other sentence transformers
+]
+
+for model_path in sentence_transformer_models:
+    if Path(model_path).exists():
+        # Include the entire model directory
+        model_name = Path(model_path).name
+        datas.append((model_path, f'models/{model_name}'))
+        
+        # Calculate size
+        total_files = sum(1 for _ in Path(model_path).rglob('*') if _.is_file())
+        total_size = sum(f.stat().st_size for f in Path(model_path).rglob('*') if f.is_file())
+        
+        print(f"[BUILD] ✅ Including Sentence Transformer: {model_name}")
+        print(f"        Files: {total_files}, Size: {total_size / (1024**2):.1f} MB")
+
+# 3. Hugging Face Cache (if models are in cache)
+cache_paths = [
+    Path.home() / '.cache' / 'huggingface' / 'hub' / 'models--sentence-transformers--all-MiniLM-L6-v2',
+    Path.home() / '.cache' / 'torch' / 'sentence_transformers',
+]
+
+for cache_path in cache_paths:
+    if cache_path.exists():
+        # Only include if not already in local models/
+        if not any(Path(model_path).exists() for model_path in sentence_transformer_models):
+            model_name = cache_path.name
+            datas.append((str(cache_path), f'models/{model_name}'))
+            total_size = sum(f.stat().st_size for f in cache_path.rglob('*') if f.is_file())
+            print(f"[BUILD] ✅ Including from cache: {model_name} ({total_size / (1024**2):.1f} MB)")
 
 # Core modules (if structured as package)
 if Path('core').exists():
     datas.append(('core', 'core'))
-    print("[BUILD] Including core/")
+    print("[BUILD] ✅ Including core/")
+
+print("="*60 + "\n")
 
 a = Analysis(
     ['main.py'],
@@ -81,10 +125,20 @@ a = Analysis(
         'transformers',
         'transformers.models',
         'transformers.models.auto',
+        
+        # ===== SENTENCE TRANSFORMERS (for embeddings) =====
         'sentence_transformers',
+        'sentence_transformers.models',
+        'sentence_transformers.util',
+        'sentence_transformers.SentenceTransformer',
+        
+        # CTRANSFORMERS (for GGUF models)
         'ctransformers',
+        
+        # HuggingFace Hub
         'huggingface_hub',
         'huggingface_hub.file_download',
+        'huggingface_hub.constants',
         'safetensors',
         'safetensors.torch',
         'tokenizers',
@@ -108,6 +162,9 @@ a = Analysis(
         'scipy',
         'scipy.spatial',
         'scipy.spatial.distance',
+        'sklearn',
+        'sklearn.metrics',
+        'sklearn.metrics.pairwise',
         
         # ===== UTILITIES =====
         'dateutil',
@@ -132,7 +189,7 @@ a = Analysis(
         # ===== WORDPRESS API =====
         'wptools',
         
-        # ===== CORE MODULES (if structured as package) =====
+        # ===== CORE MODULES =====
         'core',
         'core.database',
         'core.rss_fetcher',
@@ -140,6 +197,8 @@ a = Analysis(
         'core.wordpress_api',
         'core.wordpress_formatter',
         'core.vision_ai',
+        'core.translator',
+        'core.news_matcher',
     ],
     hookspath=[],
     hooksconfig={},
@@ -204,11 +263,16 @@ exe = EXE(
 )
 
 print("\n" + "="*60)
-print("BUILD COMPLETE!")
+print("BUILD SUMMARY")
 print("="*60)
-print(f"\nExecutable: dist/NexuzyPublisherDesk.exe")
+print(f"Executable: dist/NexuzyPublisherDesk.exe")
+print(f"Data files included: {len(datas)} directories")
+print("\nModels bundled:")
+print("  - GGUF models (if in models/)")
+print("  - Sentence Transformer models")
+print("  - Tokenizers and configs")
 print("\nNext steps:")
 print("  1. Test: dist/NexuzyPublisherDesk.exe")
 print("  2. Create installer: nexuzy_installer.iss (optional)")
 print("  3. Distribute to users")
-print("\n" + "="*60 + "\n")
+print("="*60 + "\n")
