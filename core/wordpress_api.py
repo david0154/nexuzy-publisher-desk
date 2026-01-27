@@ -1,6 +1,6 @@
 """
-WordPress API Module - Direct URL Image Import
-WordPress automatically downloads and hosts images from URLs
+WordPress API Module - PROPER Image Upload Method
+Downloads images from source then uploads to WordPress media library
 """
 
 import requests
@@ -10,11 +10,12 @@ from typing import Dict, Optional
 from pathlib import Path
 import tempfile
 import hashlib
+import re
 
 logger = logging.getLogger(__name__)
 
 class WordPressAPI:
-    """Handle WordPress API interactions with URL-based image upload"""
+    """Handle WordPress API interactions with PROPER image upload"""
     
     def __init__(self, db_path: str = 'nexuzy.db'):
         self.db_path = db_path
@@ -50,6 +51,7 @@ class WordPressAPI:
                 'User-Agent': 'Nexuzy-Publisher/2.0',
             })
             
+            logger.info(f"✅ Connected to: {self.site_url}")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize WordPress connection: {e}")
@@ -57,8 +59,10 @@ class WordPressAPI:
 
     def upload_image_from_url(self, image_url: str, title: str = '') -> Optional[int]:
         """
-        Upload image to WordPress directly from URL
-        WordPress downloads and hosts the image automatically
+        PROPER METHOD: Download image from URL → Upload to WordPress media library
+        
+        This is the ONLY reliable way - WordPress REST API does NOT support
+        direct URL uploads without custom plugins!
         
         Args:
             image_url: Direct URL to image
@@ -72,202 +76,103 @@ class WordPressAPI:
             return None
         
         try:
-            logger.info(f"Uploading image from URL to WordPress: {image_url}")
+            logger.info(f"📥 Downloading image from source: {image_url}")
             
-            # WordPress REST API: Upload from URL using wp_handle_sideload
-            # We send the image URL and WordPress downloads it
-            payload = {
-                'url': image_url,
-                'title': title or 'Featured Image',
-                'caption': '',
-                'alt_text': title or ''
-            }
-            
-            # Try WP REST API v2 sideload endpoint (plugin required)
-            # If not available, fallback to downloading locally
-            response = self.session.post(
-                f"{self.base_url}/media/sideload",
-                json=payload,
-                timeout=60
+            # Step 1: Download image from original source
+            img_response = requests.get(
+                image_url,
+                timeout=30,
+                headers={'User-Agent': 'Mozilla/5.0 (compatible; Nexuzy/2.0)'}
             )
             
-            if response.ok:
-                try:
-                    media_data = response.json()
-                    media_id = media_data.get('id')
-                    if media_id:
-                        logger.info(f"✅ Image uploaded from URL. Media ID: {media_id}")
-                        return media_id
-                except ValueError:
-                    pass
-            
-            # FALLBACK: If sideload endpoint not available, download and upload
-            logger.info("Sideload endpoint unavailable, downloading image locally...")
-            return self._fallback_download_and_upload(image_url)
-        
-        except Exception as e:
-            logger.error(f"Error uploading image from URL: {e}")
-            # Try fallback method
-            return self._fallback_download_and_upload(image_url)
-    
-    def _fallback_download_and_upload(self, image_url: str) -> Optional[int]:
-        """
-        Fallback: Download image locally then upload to WordPress
-        Used when direct URL import is not available
-        """
-        try:
-            logger.info(f"Fallback: Downloading {image_url}")
-            
-            # Download image
-            img_response = requests.get(image_url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
             if img_response.status_code != 200:
                 logger.error(f"Failed to download image: HTTP {img_response.status_code}")
                 return None
             
-            # Get filename and content type
+            # Step 2: Detect filename and content type
             filename = image_url.split('/')[-1].split('?')[0]
             if not filename or '.' not in filename:
-                filename = 'image.jpg'
+                # Fallback to content type
+                content_type = img_response.headers.get('Content-Type', 'image/jpeg')
+                ext = content_type.split('/')[-1].split(';')[0]
+                filename = f"featured-image.{ext}"
+            
+            # Ensure valid extension
+            if not any(filename.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                filename += '.jpg'
             
             content_type = img_response.headers.get('Content-Type', 'image/jpeg')
             
-            # Upload to WordPress using multipart/form-data
+            logger.info(f"📤 Uploading to WordPress: {filename} ({len(img_response.content)/1024:.1f} KB)")
+            
+            # Step 3: Upload to WordPress using multipart/form-data
+            # This is the CORE WordPress REST API method - works everywhere!
             files = {
                 'file': (filename, img_response.content, content_type)
             }
             
-            logger.info(f"Uploading downloaded image: {filename}")
+            # Set proper headers (WordPress requirement)
+            headers = {
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+            
+            # Add title if provided
+            data = {}
+            if title:
+                data['title'] = title
+                data['alt_text'] = title
+            
             response = self.session.post(
                 self.media_url,
                 files=files,
+                data=data,
+                headers=headers,
                 timeout=60
             )
             
+            # Step 4: Handle response
             if not response.ok:
                 logger.error(f"Upload failed: HTTP {response.status_code}")
                 logger.error(f"Response: {response.text[:500]}")
+                
+                # Check for common errors
+                if response.status_code == 401:
+                    logger.error("❌ AUTHENTICATION FAILED: Check your App Password!")
+                elif response.status_code == 403:
+                    logger.error("❌ PERMISSION DENIED: User needs 'author' role or higher!")
+                elif response.status_code == 413:
+                    logger.error("❌ FILE TOO LARGE: Increase upload_max_filesize in PHP!")
+                
                 return None
             
             media_data = response.json()
             media_id = media_data.get('id')
             
-            if media_id:
-                logger.info(f"✅ Image uploaded successfully. Media ID: {media_id}")
-                return media_id
+            if not media_id:
+                logger.error("No media ID in response")
+                return None
             
-            return None
+            logger.info(f"✅ Image uploaded successfully! Media ID: {media_id}")
+            logger.info(f"   URL: {media_data.get('source_url', 'N/A')}")
+            
+            return media_id
         
-        except Exception as e:
-            logger.error(f"Fallback upload error: {e}")
+        except requests.exceptions.Timeout:
+            logger.error("❌ Upload timeout - image too large or slow connection")
             return None
-
-    def download_and_cache_image(self, image_url: str) -> Optional[str]:
-        """
-        Download an image from a URL and save it to a local cache.
-        DEPRECATED: Now using direct URL upload
-        """
-        if not image_url or not image_url.startswith('http'):
-            logger.warning(f"Invalid or empty image URL provided: {image_url}")
-            return None
-
-        try:
-            cache_dir = Path(tempfile.gettempdir()) / "nexuzy_images"
-            cache_dir.mkdir(exist_ok=True)
-            file_hash = hashlib.md5(image_url.encode()).hexdigest()
-            
-            try:
-                file_ext = Path(image_url.split('?')[0]).suffix
-                if not file_ext or len(file_ext) > 5:
-                    file_ext = '.jpg'
-            except Exception:
-                file_ext = '.jpg'
-
-            local_path = cache_dir / (file_hash + file_ext)
-
-            if local_path.exists():
-                logger.info(f"Image already cached: {local_path}")
-                return str(local_path)
-
-            logger.info(f"Downloading image from {image_url} to {local_path}")
-            response = requests.get(image_url, stream=True, timeout=30)
-            response.raise_for_status()
-
-            with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            logger.info("✅ Image downloaded successfully.")
-            return str(local_path)
-
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to download image from URL {image_url}: {e}")
+            logger.error(f"❌ Network error: {e}")
             return None
         except Exception as e:
-            logger.error(f"An error occurred while caching the image: {e}")
-            return None
-    
-    def upload_image_from_local_file(self, local_path: str) -> Optional[int]:
-        """
-        Upload image directly from local file system to WordPress
-        Uses multipart/form-data format
-        """
-        try:
-            path = Path(local_path)
-            if not path.exists():
-                logger.error(f"Local image file not found: {local_path}")
-                return None
-            
-            ext = path.suffix.lower()
-            content_types = {
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.png': 'image/png',
-                '.gif': 'image/gif',
-                '.webp': 'image/webp'
-            }
-            content_type = content_types.get(ext, 'image/jpeg')
-            
-            logger.info(f"Uploading image from local file: {path.name}")
-            
-            with open(path, 'rb') as f:
-                files = {
-                    'file': (path.name, f, content_type)
-                }
-                
-                response = self.session.post(
-                    self.media_url,
-                    files=files,
-                    timeout=60
-                )
-            
-            if not response.ok:
-                logger.error(f"Image upload failed: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text[:500]}")
-                return None
-            
-            try:
-                media_data = response.json()
-                media_id = media_data.get('id')
-                
-                if not media_id:
-                    logger.error("No media ID in response")
-                    return None
-                
-                logger.info(f"✅ Image uploaded. Media ID: {media_id}")
-                return media_id
-            
-            except ValueError as e:
-                logger.error(f"JSON parsing error: {e}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"Error uploading local image: {e}")
+            logger.error(f"❌ Error uploading image: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def publish_draft(self, draft_id: int, workspace_id: int) -> Optional[Dict]:
         """
-        Publish draft to WordPress with direct URL image upload
-        OPTIMIZED: Uses URL upload instead of local caching
+        Publish draft to WordPress with proper Gutenberg block format
+        Downloads and uploads images correctly
         """
         try:
             if not self._initialize_connection(workspace_id):
@@ -290,27 +195,32 @@ class WordPressAPI:
             
             title, content, summary, image_url, source_url = result
             
-            # Upload image from URL (WordPress handles download)
+            # Upload featured image (if available)
             featured_media_id = None
             if image_url:
-                logger.info(f"Processing featured image: {image_url}")
+                logger.info(f"📸 Processing featured image: {image_url}")
                 featured_media_id = self.upload_image_from_url(image_url, title)
                 
                 if not featured_media_id:
-                    logger.warning("Featured image upload failed, continuing without image")
+                    logger.warning("⚠️ Featured image upload failed, continuing without image")
+            
+            # Convert content to Gutenberg blocks
+            gutenberg_content = self._convert_to_gutenberg_blocks(content, featured_media_id)
             
             # Create WordPress post
             post_data = {
                 'title': title,
-                'content': content,
+                'content': gutenberg_content,
                 'excerpt': summary or '',
                 'status': 'draft',  # Create as draft for review
             }
             
+            # Attach featured image (this is how WordPress shows it in editor)
             if featured_media_id:
                 post_data['featured_media'] = featured_media_id
+                logger.info(f"✅ Featured image attached: Media ID {featured_media_id}")
             
-            logger.info(f"Creating WordPress post: {title}")
+            logger.info(f"📝 Creating WordPress post: {title}")
             
             response = self.session.post(
                 self.posts_url,
@@ -321,6 +231,13 @@ class WordPressAPI:
             if not response.ok:
                 logger.error(f"Post creation failed: HTTP {response.status_code}")
                 logger.error(f"Response: {response.text[:500]}")
+                
+                # Common errors
+                if response.status_code == 401:
+                    logger.error("❌ AUTHENTICATION FAILED")
+                elif response.status_code == 403:
+                    logger.error("❌ PERMISSION DENIED - User needs author/editor role")
+                
                 return None
             
             try:
@@ -332,12 +249,15 @@ class WordPressAPI:
                     logger.error("No post ID in response")
                     return None
                 
-                logger.info(f"✅ Post created successfully: {post_url}")
+                logger.info(f"✅ Post created successfully!")
+                logger.info(f"   Post ID: {post_id}")
+                logger.info(f"   URL: {post_url}")
                 
                 return {
                     'post_id': post_id,
                     'url': post_url,
-                    'status': 'draft'
+                    'status': 'draft',
+                    'featured_image': featured_media_id
                 }
             
             except ValueError as e:
@@ -349,6 +269,77 @@ class WordPressAPI:
             import traceback
             logger.error(traceback.format_exc())
             return None
+    
+    def _convert_to_gutenberg_blocks(self, html_content: str, featured_media_id: Optional[int] = None) -> str:
+        """
+        Convert HTML content to WordPress Gutenberg blocks
+        Ensures proper rendering in WordPress block editor
+        """
+        import re
+        
+        blocks = []
+        
+        # Add featured image block at top if available
+        if featured_media_id:
+            blocks.append(f'''<!-- wp:image {{"id":{featured_media_id},"sizeSlug":"large","linkDestination":"none"}} -->
+<figure class="wp-block-image size-large"><img src="" alt="" class="wp-image-{featured_media_id}"/></figure>
+<!-- /wp:image -->''')
+        
+        # Clean HTML content
+        content = html_content.strip()
+        
+        # Split by newlines and process each line
+        lines = content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Detect headings
+            if line.startswith('<h2>') or line.startswith('<h2 '):
+                heading_text = re.sub(r'<.*?>', '', line)
+                blocks.append(f'''<!-- wp:heading -->
+<h2 class="wp-block-heading">{heading_text}</h2>
+<!-- /wp:heading -->''')
+            
+            elif line.startswith('<h3>') or line.startswith('<h3 '):
+                heading_text = re.sub(r'<.*?>', '', line)
+                blocks.append(f'''<!-- wp:heading {{"level":3}} -->
+<h3 class="wp-block-heading">{heading_text}</h3>
+<!-- /wp:heading -->''')
+            
+            elif line.startswith('<h4>') or line.startswith('<h4 '):
+                heading_text = re.sub(r'<.*?>', '', line)
+                blocks.append(f'''<!-- wp:heading {{"level":4}} -->
+<h4 class="wp-block-heading">{heading_text}</h4>
+<!-- /wp:heading -->''')
+            
+            # Detect paragraphs
+            elif line.startswith('<p>') or line.startswith('<p '):
+                para_text = re.sub(r'<p[^>]*>|</p>', '', line).strip()
+                if para_text:
+                    blocks.append(f'''<!-- wp:paragraph -->
+<p>{para_text}</p>
+<!-- /wp:paragraph -->''')
+            
+            # Detect lists
+            elif line.startswith('<ul>') or line.startswith('<ul '):
+                # Extract list items
+                items = re.findall(r'<li>(.*?)</li>', line)
+                if items:
+                    list_html = '\n'.join([f'<li>{item}</li>' for item in items])
+                    blocks.append(f'''<!-- wp:list -->
+<ul>{list_html}</ul>
+<!-- /wp:list -->''')
+            
+            # Plain text (no HTML tags) - convert to paragraph
+            elif line and not line.startswith('<'):
+                blocks.append(f'''<!-- wp:paragraph -->
+<p>{line}</p>
+<!-- /wp:paragraph -->''')
+        
+        return '\n\n'.join(blocks)
     
     def test_connection(self, site_url: str, username: str, password: str) -> bool:
         """
@@ -365,11 +356,29 @@ class WordPressAPI:
             response = session.get(test_url, timeout=15)
 
             if response.status_code == 200:
-                logger.info("✅ WordPress connection test successful.")
+                user_data = response.json()
+                logger.info(f"✅ WordPress connection successful!")
+                logger.info(f"   User: {user_data.get('name', 'Unknown')}")
+                logger.info(f"   Roles: {', '.join(user_data.get('roles', []))}")
+                
+                # Check permissions
+                roles = user_data.get('roles', [])
+                if not any(role in roles for role in ['administrator', 'editor', 'author']):
+                    logger.warning("⚠️ User role may not have media upload permissions!")
+                    logger.warning("   Recommended: author, editor, or administrator")
+                
                 return True
             else:
                 logger.warning(f"WordPress connection test failed: {response.status_code}")
                 logger.warning(f"Response: {response.text[:500]}")
+                
+                if response.status_code == 401:
+                    logger.error("❌ AUTHENTICATION FAILED!")
+                    logger.error("   Check: Username and Application Password are correct")
+                elif response.status_code == 403:
+                    logger.error("❌ PERMISSION DENIED!")
+                    logger.error("   Check: REST API is enabled")
+                
                 return False
         except requests.exceptions.RequestException as e:
             logger.error(f"Error during WordPress connection test: {e}")
