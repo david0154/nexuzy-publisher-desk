@@ -386,6 +386,7 @@ Write the complete article now:[/INST]"""
         
         try:
             logger.info("⏳ Generating with AI model (30-60 seconds)...")
+            logger.info(f"📝 Prompt length: {len(prompt)} chars")
             
             generated_text = self.llm(
                 prompt,
@@ -397,24 +398,37 @@ Write the complete article now:[/INST]"""
                 stream=False
             )
             
+            # DEBUG: Show what model actually returned
+            logger.info(f"🔍 DEBUG: Model returned type: {type(generated_text)}")
+            logger.info(f"🔍 DEBUG: Raw output length: {len(str(generated_text)) if generated_text else 0} chars")
+            logger.info(f"🔍 DEBUG: First 500 chars of output: '{str(generated_text)[:500]}'")
+            
             # CRITICAL FIX: Check if generated_text is valid
-            if not generated_text or not isinstance(generated_text, str):
-                logger.error(f"❌ Model returned invalid output: {type(generated_text)}")
+            if not generated_text:
+                logger.error(f"❌ Model returned None or empty")
                 return {
-                    'error': 'AI model returned empty or invalid response',
+                    'error': 'AI model returned None',
                     'title': headline,
                     'body_draft': '',
                     'summary': summary,
                     'word_count': 0
                 }
             
-            generated_text = str(generated_text).strip()
+            if not isinstance(generated_text, str):
+                logger.error(f"❌ Model returned non-string type: {type(generated_text)}")
+                generated_text = str(generated_text)
+            
+            generated_text = generated_text.strip()
+            logger.info(f"🔍 DEBUG: After strip: {len(generated_text)} chars")
             
             if not generated_text or len(generated_text) < 100:
                 logger.error(f"❌ Model generated too little text: {len(generated_text)} chars")
-                logger.error(f"Generated text: {generated_text[:200]}")
+                logger.error(f"📄 Full generated text: '{generated_text}'")
+                logger.warning("⚠️  TinyLlama 1.1B is TOO SMALL for this task!")
+                logger.warning("📥 Download Phi-2 (2.7B) or Mistral-7B instead")
+                logger.warning("🔗 See RECOMMENDED_MODELS.md for download links")
                 return {
-                    'error': f'AI generated only {len(generated_text)} characters (need 800+ words)',
+                    'error': f'AI generated only {len(generated_text)} characters. TinyLlama 1.1B is too small. Use Phi-2 or Mistral-7B.',
                     'title': headline,
                     'body_draft': '',
                     'summary': summary,
@@ -423,9 +437,11 @@ Write the complete article now:[/INST]"""
             
             # Clean the generated text
             cleaned_text = self._clean_generated_text(generated_text)
+            logger.info(f"🔍 DEBUG: After cleaning: {len(cleaned_text)} chars")
             
             if not cleaned_text or len(cleaned_text) < 100:
                 logger.error(f"❌ Cleaned text too short: {len(cleaned_text)} chars")
+                logger.error(f"📄 Original was: {len(generated_text)} chars")
                 return {
                     'error': 'AI generated text was removed during cleaning',
                     'title': headline,
@@ -442,6 +458,7 @@ Write the complete article now:[/INST]"""
             
             if word_count < 100:
                 logger.warning(f"⚠️  Word count very low: {word_count}")
+                logger.warning("📥 Consider using Phi-2 or Mistral-7B for better results")
             
             return {
                 'title': headline,
