@@ -1,6 +1,6 @@
 """ 
 AI Draft Generation Module - Complete Article Rewriting with GGUF Models
-Generates professional news articles (400-600 words) with AI - OPTIMIZED FOR SPEED
+Generates professional news articles (600-800 words) with AI
 
 REQUIRES: GGUF model file in models/ directory
 NO SAFE MODE - Fails gracefully if model not available
@@ -56,11 +56,12 @@ class DraftGenerator:
         elif 'qwen' in filename_lower:
             return 'qwen'
         else:
+            # Default to llama (most common)
             logger.warning(f"⚠️  Could not detect model type from '{model_path.name}', defaulting to 'llama'")
             return 'llama'
     
     def _load_model(self):
-        """Load GGUF quantized model - AUTO-DETECT MODEL TYPE - OPTIMIZED FOR SPEED"""
+        """Load GGUF quantized model - AUTO-DETECT MODEL TYPE"""
         try:
             from ctransformers import AutoModelForCausalLM
             
@@ -72,7 +73,8 @@ class DraftGenerator:
                 Path('models') / self.model_file,  # models/filename
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,  # User cache
                 Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',  # Recommended model
-               Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',  # Alternative quant
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',  # Old default
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',  # Alternative quant
             ]
             
             model_path = None
@@ -97,15 +99,15 @@ class DraftGenerator:
             # Load GGUF model with ctransformers - OPTIMIZED FOR SPEED
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
-                model_type=model_type,
-                context_length=1024,  # REDUCED from 2048 (2x faster loading)
-                max_new_tokens=600,   # REDUCED from 1200 (2x faster generation)
-                threads=4,
-                gpu_layers=0
+                model_type=model_type,  # AUTO-DETECTED!
+                context_length=1024,  # REDUCED from 2048 for 2x faster generation
+                max_new_tokens=600,   # REDUCED from 1200 for 2x faster generation
+                threads=4,  # Use more CPU threads
+                gpu_layers=0  # CPU only
             )
             
             logger.info(f"✅ GGUF model loaded successfully: {model_path.name} (type: {model_type})")
-            logger.info("⚡ Model optimized for fast generation (30-40s per article)")
+            logger.info("⚡ OPTIMIZED for fast generation (30-40s per article)")
             return llm
         
         except ImportError:
@@ -122,23 +124,29 @@ class DraftGenerator:
             from transformers import pipeline
             logger.info("Loading sentence improvement model (flan-t5-base)...")
             
+            # Try with timeout handling
             model = pipeline(
                 "text2text-generation",
                 model="google/flan-t5-base",
                 max_length=150,
-                device=-1
+                device=-1  # CPU only
             )
             logger.info("✅ Sentence improvement model loaded")
             return model
         except Exception as e:
-            logger.warning(f"⚠️  Sentence model unavailable: {e}")
+            logger.warning(f"⚠️  Sentence model unavailable (network timeout or error): {e}")
             logger.info("💡 App will use rule-based sentence improvement")
             return None
     
     def improve_sentence(self, sentence: str) -> str:
+        """
+        Improve a single sentence with AI or rule-based enhancement
+        Used by WYSIWYG editor's "🤖 Improve Sentence" button
+        """
         if not sentence or len(sentence.strip()) < 10:
             return sentence
         
+        # Try AI model if available
         if self.sentence_model:
             try:
                 prompt = f"Rewrite this sentence to be more professional and clear: {sentence}"
@@ -149,215 +157,456 @@ class DraftGenerator:
             except Exception as e:
                 logger.error(f"Sentence improvement error: {e}")
         
+        # Fallback: Rule-based improvement
         improved = sentence.strip()
+        
+        # Add period if missing
         if not improved.endswith(('.', '!', '?')):
             improved += '.'
+        
+        # Capitalize first letter
         if improved:
             improved = improved[0].upper() + improved[1:]
+        
+        # Remove multiple spaces
         improved = re.sub(r'\s+', ' ', improved)
         
+        # Replace informal words
         replacements = {
-            'gonna': 'going to', 'wanna': 'want to', 'gotta': 'got to',
-            'kinda': 'kind of', 'sorta': 'sort of', 'dunno': "don't know",
-            'yeah': 'yes', 'nope': 'no'
+            'gonna': 'going to',
+            'wanna': 'want to',
+            'gotta': 'got to',
+            'kinda': 'kind of',
+            'sorta': 'sort of',
+            'dunno': "don't know",
+            'yeah': 'yes',
+            'nope': 'no'
         }
+        
         for informal, formal in replacements.items():
             improved = re.sub(r'\b' + informal + r'\b', formal, improved, flags=re.IGNORECASE)
         
         return improved
     
     def _load_translation_keywords(self) -> Dict:
+        """Load keywords for story structure detection"""
         return {
-            'technology': ['ai', 'technology', 'software', 'app', 'digital', 'tech', 'innovation'],
-            'business': ['revenue', 'profit', 'stock', 'market', 'business', 'company', 'ceo'],
-            'politics': ['government', 'president', 'minister', 'law', 'policy', 'election'],
-            'health': ['health', 'medical', 'hospital', 'doctor', 'patient', 'disease'],
-            'crisis': ['crisis', 'emergency', 'disaster', 'accident', 'fire', 'flood'],
-            'sports': ['team', 'player', 'match', 'game', 'win', 'championship'],
+            'technology': ['ai', 'technology', 'software', 'app', 'digital', 'tech', 'innovation', 'algorithm', 'system', 'platform', 'blockchain', 'quantum', 'machine learning', 'data', 'cloud', 'cyber'],
+            'business': ['revenue', 'profit', 'stock', 'market', 'business', 'company', 'ceo', 'investor', 'startup', 'funding', 'acquisition', 'merger', 'sales', 'growth', 'quarterly', 'earnings'],
+            'politics': ['government', 'president', 'minister', 'law', 'policy', 'election', 'parliament', 'congress', 'senate', 'legislation', 'vote', 'political', 'campaign', 'diplomat', 'treaty'],
+            'health': ['health', 'medical', 'hospital', 'doctor', 'patient', 'disease', 'treatment', 'vaccine', 'coronavirus', 'covid', 'pandemic', 'epidemic', 'virus', 'cure', 'pharmaceutical'],
+            'crisis': ['crisis', 'emergency', 'disaster', 'accident', 'fire', 'flood', 'storm', 'earthquake', 'explosion', 'incident', 'tragedy', 'victim', 'damage', 'rescue', 'alert'],
+            'sports': ['team', 'player', 'match', 'game', 'win', 'championship', 'score', 'sport', 'athlete', 'coach', 'tournament', 'league', 'competition', 'season', 'victory'],
         }
     
     def _extract_topic_info(self, headline: str, summary: str, category: str) -> Dict:
-        entities = {'people': [], 'organizations': [], 'places': [], 'events': [], 'numbers': [], 'technical_terms': []}
+        """Extract comprehensive topic information"""
+        entities = {
+            'people': [],
+            'organizations': [],
+            'places': [],
+            'events': [],
+            'numbers': [],
+            'technical_terms': []
+        }
+        
         full_text = (headline + ' ' + summary).lower()
+        
+        # Find capitalized words (potential names/places)
         original_text = headline + ' ' + summary
         original_words = original_text.split()
         capitalized = [w for w in original_words if w and w[0].isupper() and len(w) > 2 and w not in ['The', 'A', 'An', 'And', 'Or', 'But']]
+        
+        # Extract numbers/statistics
         numbers = re.findall(r'\d+(?:\.\d+)?%?|\d{1,3}(?:,\d{3})*', headline + ' ' + summary)
+        entities['numbers'] = numbers[:10]
+        
+        # Extract technical terms
+        for keyword_list in self.translation_keywords.values():
+            for keyword in keyword_list:
+                if keyword in full_text:
+                    entities['technical_terms'].append(keyword)
+        
+        topic_focus = self._determine_focus(headline, summary, category)
         
         return {
-            'capitalized_terms': capitalized[:5],  # REDUCED from 15
-            'numbers': numbers[:3],  # REDUCED from 10
+            'entities': entities,
+            'capitalized_terms': capitalized[:15],
+            'numbers': numbers,
+            'focus': topic_focus,
             'category': category,
+            'summary': summary[:200]
         }
     
+    def _determine_focus(self, headline: str, summary: str, category: str) -> str:
+        """Determine the main focus/angle of the story"""
+        text = (headline + ' ' + summary).lower()
+        scores = {}
+        
+        for topic, keywords in self.translation_keywords.items():
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                scores[topic] = score
+        
+        if scores:
+            top_topic = max(scores, key=scores.get)
+            return f"{top_topic} development"
+        
+        return f"{category.lower()} development"
+    
     def download_and_store_image(self, image_url: str, news_id: int) -> Optional[str]:
+        """
+        Download image from URL and store locally
+        Returns local file path or None
+        """
         if not image_url:
             return None
+        
         try:
             logger.info(f"Downloading image: {image_url}")
             response = requests.get(image_url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+            
             if response.status_code != 200:
+                logger.error(f"Failed to download image: HTTP {response.status_code}")
                 return None
+            
             from PIL import Image
             img = Image.open(BytesIO(response.content))
+            
+            # Create images directory if not exists
             images_dir = Path('downloaded_images')
             images_dir.mkdir(exist_ok=True)
+            
+            # Generate filename
             ext = image_url.split('.')[-1].split('?')[0]
             if ext not in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
                 ext = 'jpg'
+            
             filename = f"news_{news_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             filepath = images_dir / filename
+            
+            # Save image
             img.save(filepath)
             logger.info(f"✅ Image downloaded: {filepath}")
+            
             return str(filepath)
+        
         except Exception as e:
             logger.error(f"Error downloading image: {e}")
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
+        """
+        Generate complete article draft with AI - NO FALLBACK MODE
+        Fails if AI model not available
+        """
         try:
+            # Check if model is loaded
             if not self.llm:
-                return {'error': '❌ AI model not loaded', 'title': '', 'body_draft': '', 'word_count': 0}
+                error_msg = "❌ AI model not loaded. Cannot generate article. Download GGUF model first."
+                logger.error(error_msg)
+                return {
+                    'error': error_msg,
+                    'title': '',
+                    'body_draft': '',
+                    'word_count': 0
+                }
             
+            # Get news details
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('SELECT headline, summary, source_url, source_domain, category, image_url FROM news_queue WHERE id = ?', (news_id,))
+            
+            cursor.execute('''
+                SELECT headline, summary, source_url, source_domain, category, image_url
+                FROM news_queue WHERE id = ?
+            ''', (news_id,))
+            
             news = cursor.fetchone()
             if not news:
                 conn.close()
                 return {'error': 'News not found'}
+            
             headline, summary, source_url, source_domain, category, image_url = news
+            
+            # Get workspace_id
             cursor.execute('SELECT workspace_id FROM news_queue WHERE id = ?', (news_id,))
             workspace_id = cursor.fetchone()[0]
             conn.close()
             
+            # Download and store image locally (optional)
             local_image_path = None
             if image_url:
                 local_image_path = self.download_and_store_image(image_url, news_id)
             
+            # Extract topic information
             topic_info = self._extract_topic_info(headline, summary or '', category)
+            
+            # Generate with AI model (REQUIRED)
             logger.info(f"🤖 Generating article with AI for: {headline[:50]}...")
             draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             
+            # Check if generation failed
             if 'error' in draft or not draft.get('body_draft'):
-                return {'error': draft.get('error', 'AI generation failed'), 'title': headline, 'body_draft': '', 'word_count': 0}
+                error_msg = draft.get('error', 'AI generation returned empty content')
+                logger.error(f"❌ Generation failed: {error_msg}")
+                return {
+                    'error': error_msg,
+                    'title': headline,
+                    'body_draft': '',
+                    'word_count': 0
+                }
             
-            draft['image_url'] = image_url or ''
+            # Store original image URL for WordPress upload
+            draft['image_url'] = image_url or ''  # IMPORTANT: Keep original URL
             draft['local_image_path'] = local_image_path or ''
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
             draft['is_html'] = True
+            
+            # Store draft
             draft_id = self._store_draft(news_id, workspace_id, draft)
+            
             logger.info(f"✅ Generated draft {draft_id} for news_id {news_id}, words: {draft.get('word_count', 0)}")
             return {**draft, 'id': draft_id}
+        
         except Exception as e:
             logger.error(f"❌ Error generating draft: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {'error': str(e)}
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        # SIMPLIFIED PROMPT FOR SPEED
-        prompt = f"""Write a 400-word news article.
+        """Generate complete article with AI model - OPTIMIZED FOR SPEED"""
+        
+        topic_context = f"""Topic: {topic_info['focus']}
+Category: {category}
+Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
+Statistics: {', '.join(topic_info['numbers'][:3])}"""
+        
+        # IMPROVED PROMPT - Natural article structure (target 600 words for speed)
+        prompt = f"""Write a professional news article (600 words) based on this headline.
 
 Headline: {headline}
 Summary: {summary}
 
-Write clear paragraphs with facts.
+{topic_context}
+
+Write a clear, factual news article with:
+- Opening paragraph summarizing the key facts
+- Background information and context
+- Important details from the summary
+- Professional journalistic tone
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating (30-40s)...")
+            logger.info("⏳ Generating with AI model (30-40 seconds)...")
+            logger.info(f"📝 Prompt length: {len(prompt)} chars")
+            
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=600,       # OPTIMIZED
-                temperature=0.6,          # REDUCED
-                top_p=0.9,               # REDUCED
-                repetition_penalty=1.2,  # INCREASED
-                stop=["\n\n\n\n", "Summary:", "Article:"],
+                max_new_tokens=600,      # REDUCED from 1000 for 2x speed
+                temperature=0.7,
+                top_p=0.95,
+                repetition_penalty=1.15,
+                stop=["\n\n\n", "Article:", "Summary:"],
                 stream=False
             )
             
-            logger.info(f"🔍 Output: {len(str(generated_text)) if generated_text else 0} chars")
+            # DEBUG: Show what model actually returned
+            logger.info(f"🔍 DEBUG: Model returned type: {type(generated_text)}")
+            logger.info(f"🔍 DEBUG: Raw output length: {len(str(generated_text)) if generated_text else 0} chars")
+            logger.info(f"🔍 DEBUG: First 500 chars of output: '{str(generated_text)[:500]}'")
             
-            if not generated_text or len(str(generated_text)) < 100:
-                return {'error': 'AI generated too little text', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+            # CRITICAL FIX: Check if generated_text is valid
+            if not generated_text:
+                logger.error(f"❌ Model returned None or empty")
+                return {
+                    'error': 'AI model returned None',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
             
-            generated_text = str(generated_text).strip()
+            if not isinstance(generated_text, str):
+                logger.error(f"❌ Model returned non-string type: {type(generated_text)}")
+                generated_text = str(generated_text)
+            
+            generated_text = generated_text.strip()
+            logger.info(f"🔍 DEBUG: After strip: {len(generated_text)} chars")
+            
+            if not generated_text or len(generated_text) < 100:
+                logger.error(f"❌ Model generated too little text: {len(generated_text)} chars")
+                logger.error(f"📄 Full generated text: '{generated_text}'")
+                logger.warning("⚠️  Model may be too small or prompt too complex")
+                return {
+                    'error': f'AI generated only {len(generated_text)} characters. Need 400+ words.',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
+            
+            # Clean the generated text
             cleaned_text = self._clean_generated_text(generated_text)
+            logger.info(f"🔍 DEBUG: After cleaning: {len(cleaned_text)} chars")
             
-            if len(cleaned_text) < 100:
-                return {'error': 'Cleaned text too short', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+            if not cleaned_text or len(cleaned_text) < 100:
+                logger.error(f"❌ Cleaned text too short: {len(cleaned_text)} chars")
+                logger.error(f"📄 Original was: {len(generated_text)} chars")
+                return {
+                    'error': 'AI generated text was removed during cleaning',
+                    'title': headline,
+                    'body_draft': '',
+                    'summary': summary,
+                    'word_count': 0
+                }
             
+            # Convert to HTML
             html_content = self._convert_to_html(cleaned_text)
-            word_count = len(cleaned_text.split())
-            logger.info(f"✅ Generated {word_count} words")
             
-            return {'title': headline, 'body_draft': html_content, 'summary': summary, 'word_count': word_count, 'is_ai_generated': True, 'generation_mode': 'ai_model'}
+            word_count = len(cleaned_text.split())
+            logger.info(f"✅ AI generated {word_count} words")
+            
+            if word_count < 200:
+                logger.warning(f"⚠️  Word count low: {word_count}. Article may be incomplete.")
+            
+            return {
+                'title': headline,
+                'body_draft': html_content,
+                'summary': summary,
+                'word_count': word_count,
+                'is_ai_generated': True,
+                'generation_mode': 'ai_model'
+            }
         except Exception as e:
-            logger.error(f"❌ Generation error: {e}")
-            return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+            logger.error(f"❌ Model generation error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                'error': f"AI generation failed: {str(e)}",
+                'title': headline,
+                'body_draft': '',
+                'summary': summary,
+                'word_count': 0
+            }
     
     def _clean_generated_text(self, text: str) -> str:
-        unwanted = ["Note:", "Disclaimer:", "Generated by", "AI-generated", "As an AI", "I cannot", "I apologize"]
+        """Clean and format AI-generated text"""
+        # Remove unwanted disclaimers
+        unwanted_phrases = [
+            "Note: This article",
+            "Disclaimer:",
+            "Generated by",
+            "AI-generated",
+            "[This article",
+            "This content was",
+            "As an AI",
+            "I cannot",
+            "I apologize"
+        ]
+        
         cleaned = text
-        for phrase in unwanted:
+        for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
-                if pos > 200:
+                if pos > 200:  # Only cut if substantial content exists
                     cleaned = cleaned[:pos].strip()
                     break
-        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-        cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned, flags=re.MULTILINE)
-        return cleaned.strip()
+        
+        # Clean up formatting
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)  # Max 2 newlines
+        cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned, flags=re.MULTILINE)  # Remove bullets
+        cleaned = cleaned.strip()
+        
+        return cleaned
     
     def _check_column_exists(self, cursor, table: str, column: str) -> bool:
+        """Check if a column exists in a table"""
         try:
             cursor.execute(f"PRAGMA table_info({table})")
-            return column in [col[1] for col in cursor.fetchall()]
-        except:
+            columns = [col[1] for col in cursor.fetchall()]
+            return column in columns
+        except Exception:
             return False
     
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
+        """Store draft in database with HTML format"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
             html_body = draft.get('body_draft', '')
+            
+            # Embed local image in HTML if available (for preview)
             if draft.get('local_image_path'):
-                html_body = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n' + html_body
+                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
+                html_body = image_html + html_body
             
+            # Dynamic Insert
             columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
-            values = [workspace_id, news_id, draft.get('title', ''), html_body, draft.get('summary', ''), draft.get('word_count', 0), draft.get('image_url', ''), draft.get('source_url', ''), datetime.now().isoformat()]
+            values = [
+                workspace_id,
+                news_id,
+                draft.get('title', ''),
+                html_body,
+                draft.get('summary', ''),
+                draft.get('word_count', 0),
+                draft.get('image_url', ''),  # Store original URL for WordPress
+                draft.get('source_url', ''),
+                datetime.now().isoformat()
+            ]
             
+            # Optional columns
             if self._check_column_exists(cursor, 'ai_drafts', 'source_domain'):
                 columns.append('source_domain')
                 values.append(draft.get('source_domain', ''))
+            
             if self._check_column_exists(cursor, 'ai_drafts', 'is_html'):
                 columns.append('is_html')
                 values.append(1)
+            
             if self._check_column_exists(cursor, 'ai_drafts', 'generation_mode'):
                 columns.append('generation_mode')
                 values.append(draft.get('generation_mode', 'unknown'))
             
-            cursor.execute(f"INSERT INTO ai_drafts ({', '.join(columns)}) VALUES ({', '.join(['?' for _ in values])})", values)
+            placeholders = ', '.join(['?' for _ in values])
+            column_names = ', '.join(columns)
+            
+            cursor.execute(f'''
+                INSERT INTO ai_drafts 
+                ({column_names})
+                VALUES ({placeholders})
+            ''', values)
+            
             conn.commit()
             draft_id = cursor.lastrowid
             conn.close()
+            
             return draft_id
+        
         except Exception as e:
             logger.error(f"❌ Error storing draft: {e}")
             return 0
     
     def _convert_to_html(self, text: str) -> str:
+        """Convert plain text / markdown to proper HTML"""
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
+        
         for line in lines:
             line = line.strip()
+            
             if not line:
+                # Empty line - end current paragraph
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
                 continue
+            
+            # Check if it's a heading
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
@@ -369,22 +618,37 @@ Article:"""
                     current_paragraph = []
                 html_parts.append(f"<h2>{line.title()}</h2>")
             else:
+                # Regular text - add to paragraph
                 current_paragraph.append(line)
+        
+        # Add final paragraph
         if current_paragraph:
             html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+        
         return '\n\n'.join(html_parts)
     
     def cleanup_old_queue(self, days: int = 15):
+        """Remove news items older than specified days from queue"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
             cutoff_date = datetime.now() - timedelta(days=days)
-            cursor.execute('UPDATE news_queue SET status = "archived" WHERE fetched_at < ? AND status = "pending"', (cutoff_date.isoformat(),))
+            
+            # FIXED: Use fetched_at instead of created_at (column doesn't exist)
+            cursor.execute('''
+                UPDATE news_queue
+                SET status = 'archived'
+                WHERE fetched_at < ? AND status = 'pending'
+            ''', (cutoff_date.isoformat(),))
+            
             conn.commit()
-            affected = cursor.rowcount
+            affected_rows = cursor.rowcount
             conn.close()
-            logger.info(f"Archived {affected} news items older than {days} days")
-            return affected
+            
+            logger.info(f"Archived {affected_rows} news items older than {days} days")
+            return affected_rows
+        
         except Exception as e:
-            logger.error(f"❌ Error cleaning queue: {e}")
+            logger.error(f"❌ Error cleaning up queue: {e}")
             return 0
