@@ -1,4 +1,4 @@
-\"""
+"""
 Vision AI Module - Image Analysis with Watermark Detection
 Verifies images, detects watermarks, optimizes for web publishing
 """
