@@ -1,11 +1,16 @@
 """
-RSS Manager - Enhanced with Image Extraction
-Fetches news from RSS feeds using feedparser with image support
+RSS Manager - Enhanced with Duplicate Detection & Auto-Cleanup
+Fetches news from RSS feeds with advanced filtering
+- URL-based duplicate detection
+- Headline similarity checking  
+- 48-hour automatic news cleanup
+- Today's news only option
 """
 
 import sqlite3
 import logging
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import re
 
@@ -25,6 +30,107 @@ class RSSManager:
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
+        self.cleanup_hours = 48  # Auto-delete news older than 48 hours
+        self.max_entries_per_feed = 20
+    
+    def _generate_url_hash(self, url):
+        """Generate unique hash for URL deduplication"""
+        if not url:
+            return None
+        # Normalize URL (remove query params, trailing slash)
+        clean_url = url.split('?')[0].rstrip('/')
+        return hashlib.md5(clean_url.encode()).hexdigest()
+    
+    def _check_duplicate_url(self, conn, workspace_id, url):
+        """Check if URL already exists in database"""
+        if not url:
+            return False
+        
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) FROM news_queue 
+            WHERE workspace_id = ? AND source_url = ?
+        ''', (workspace_id, url))
+        
+        return cursor.fetchone()[0] > 0
+    
+    def _check_duplicate_headline(self, conn, workspace_id, headline):
+        """Check if similar headline already exists"""
+        if not headline or len(headline) < 10:
+            return False
+        
+        cursor = conn.cursor()
+        # Check exact match first
+        cursor.execute('''
+            SELECT COUNT(*) FROM news_queue 
+            WHERE workspace_id = ? AND headline = ?
+        ''', (workspace_id, headline))
+        
+        if cursor.fetchone()[0] > 0:
+            return True
+        
+        # Check for very similar headlines (first 50 chars)
+        headline_prefix = headline[:50].lower()
+        cursor.execute('''
+            SELECT COUNT(*) FROM news_queue 
+            WHERE workspace_id = ? AND LOWER(SUBSTR(headline, 1, 50)) = ?
+        ''', (workspace_id, headline_prefix))
+        
+        return cursor.fetchone()[0] > 0
+    
+    def cleanup_old_news(self, workspace_id, hours=None):
+        """Delete news older than specified hours (default 48)"""
+        if hours is None:
+            hours = self.cleanup_hours
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Calculate cutoff time
+            cutoff_time = datetime.now() - timedelta(hours=hours)
+            cutoff_str = cutoff_time.isoformat()
+            
+            # Delete old news
+            cursor.execute('''
+                DELETE FROM news_queue 
+                WHERE workspace_id = ? 
+                AND fetched_at < ?
+                AND status = 'new'
+            ''', (workspace_id, cutoff_str))
+            
+            deleted_count = cursor.rowcount
+            
+            # Also clean up orphaned drafts (news_id no longer exists)
+            cursor.execute('''
+                DELETE FROM ai_drafts 
+                WHERE workspace_id = ? 
+                AND news_id NOT IN (SELECT id FROM news_queue)
+            ''', (workspace_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                logger.info(f"✅ Cleaned up {deleted_count} old news items (>{hours}h)")
+            
+            return deleted_count
+        
+        except Exception as e:
+            logger.error(f"❌ Cleanup error: {e}")
+            return 0
+    
+    def _is_today_news(self, publish_date_str):
+        """Check if news is from today"""
+        try:
+            # Parse various date formats
+            from dateutil import parser
+            pub_date = parser.parse(publish_date_str)
+            today = datetime.now().date()
+            return pub_date.date() == today
+        except:
+            # If can't parse, assume it's recent
+            return True
     
     def extract_image_from_entry(self, entry):
         """Extract image URL from RSS entry"""
@@ -69,11 +175,21 @@ class RSSManager:
         
         return image_url
     
-    def fetch_news_from_feeds(self, workspace_id):
-        """Fetch latest news from all active RSS feeds with images"""
+    def fetch_news_from_feeds(self, workspace_id, today_only=False):
+        """
+        Fetch latest news from all active RSS feeds with images
+        
+        Args:
+            workspace_id: Current workspace
+            today_only: If True, only fetch today's news
+        """
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4. Install with: pip install feedparser beautifulsoup4 requests")
+        
+        # First, cleanup old news (48-hour auto-delete)
+        logger.info("🧹 Running 48-hour cleanup...")
+        deleted_count = self.cleanup_old_news(workspace_id)
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -92,11 +208,12 @@ class RSSManager:
             return 0, "No RSS feeds configured. Add some feeds first!"
         
         total_fetched = 0
+        total_skipped = 0
         
         for feed_id, feed_name, feed_url, category in feeds:
             try:
                 # Parse RSS feed with timeout
-                logger.info(f"Fetching from: {feed_name} ({feed_url})")
+                logger.info(f"📰 Fetching from: {feed_name} ({feed_url})")
                 
                 # Use requests with User-Agent to avoid blocks
                 headers = {
@@ -111,13 +228,13 @@ class RSSManager:
                     feed = feedparser.parse(feed_url)
                 
                 if not feed.entries:
-                    logger.warning(f"No entries found in feed: {feed_url}")
+                    logger.warning(f"⚠️ No entries found in feed: {feed_url}")
                     continue
                 
-                logger.info(f"Found {len(feed.entries)} entries in {feed_name}")
+                logger.info(f"✅ Found {len(feed.entries)} entries in {feed_name}")
                 
-                # Process each entry (limit to 20 latest)
-                for entry in feed.entries[:20]:
+                # Process each entry (limit to configured max)
+                for entry in feed.entries[:self.max_entries_per_feed]:
                     try:
                         # Extract data
                         headline = entry.get('title', 'No title').strip()
@@ -136,51 +253,63 @@ class RSSManager:
                         if not headline or len(headline) < 10:
                             continue
                         
+                        # Get publish date
+                        publish_date = entry.get('published', entry.get('updated', datetime.now().isoformat()))
+                        
+                        # Filter: Today only if requested
+                        if today_only and not self._is_today_news(publish_date):
+                            total_skipped += 1
+                            continue
+                        
+                        # DUPLICATE CHECK #1: URL
+                        if self._check_duplicate_url(conn, workspace_id, source_url):
+                            total_skipped += 1
+                            continue
+                        
+                        # DUPLICATE CHECK #2: Headline
+                        if self._check_duplicate_headline(conn, workspace_id, headline):
+                            total_skipped += 1
+                            continue
+                        
                         # Get domain
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # Get publish date
-                        publish_date = entry.get('published', entry.get('updated', datetime.now().isoformat()))
-                        
                         # Extract image URL
                         image_url = self.extract_image_from_entry(entry)
-                        
-                        # Check if already exists (check by headline similarity)
-                        cursor.execute('''
-                            SELECT COUNT(*) FROM news_queue 
-                            WHERE workspace_id = ? AND headline = ?
-                        ''', (workspace_id, headline))
-                        
-                        if cursor.fetchone()[0] > 0:
-                            continue  # Already exists
                         
                         # Insert into news_queue
                         cursor.execute('''
                             INSERT INTO news_queue 
                             (workspace_id, headline, summary, source_url, source_domain, 
-                             category, publish_date, status, image_url)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)
+                             category, publish_date, status, image_url, fetched_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, CURRENT_TIMESTAMP)
                         ''', (workspace_id, headline, summary, source_url, source_domain, 
                               category or 'General', publish_date, image_url))
                         
                         total_fetched += 1
                         
                     except Exception as e:
-                        logger.error(f"Error processing entry: {e}")
+                        logger.error(f"❌ Error processing entry: {e}")
                         continue
                 
-                logger.info(f"Fetched {total_fetched} articles from {feed_name}")
+                logger.info(f"✅ Fetched {total_fetched} new articles from {feed_name}")
                 
             except Exception as e:
-                logger.error(f"Error fetching feed {feed_url}: {e}")
+                logger.error(f"❌ Error fetching feed {feed_url}: {e}")
                 continue
         
         conn.commit()
         conn.close()
         
-        logger.info(f"Total fetched: {total_fetched} new articles")
-        return total_fetched, f"Successfully fetched {total_fetched} new articles with images!"
+        result_msg = f"✅ Successfully fetched {total_fetched} new articles!"
+        if deleted_count > 0:
+            result_msg += f"\n🧹 Cleaned up {deleted_count} old news (48h+ old)"
+        if total_skipped > 0:
+            result_msg += f"\n⏭️ Skipped {total_skipped} duplicates"
+        
+        logger.info(f"🎉 Total: {total_fetched} new | {total_skipped} skipped | {deleted_count} cleaned")
+        return total_fetched, result_msg
     
     def add_feed(self, workspace_id, feed_name, feed_url, category='General'):
         """Add a new RSS feed"""
@@ -222,3 +351,23 @@ class RSSManager:
         conn.close()
         
         return feeds
+    
+    def get_news_count(self, workspace_id, hours=48):
+        """Get count of news within specified hours"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cutoff_time = datetime.now() - timedelta(hours=hours)
+            cutoff_str = cutoff_time.isoformat()
+            
+            cursor.execute('''
+                SELECT COUNT(*) FROM news_queue 
+                WHERE workspace_id = ? AND fetched_at >= ?
+            ''', (workspace_id, cutoff_str))
+            
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except:
+            return 0
