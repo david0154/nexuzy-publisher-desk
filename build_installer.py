@@ -149,14 +149,13 @@ def clean_build():
     print("  ✅ Clean completed")
 
 def create_spec_file():
-    """Create PyInstaller spec file with all configurations"""
+    """Create PyInstaller spec file with all configurations - FIXED FOR LARGE MODELS"""
     print("\n[4/8] Creating PyInstaller configuration...")
     
-    spec_content = f'''
-# -*- mode: python ; coding: utf-8 -*-
+    spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller Configuration for {APP_NAME}
-Auto-generated - DO NOT EDIT MANUALLY
+Auto-generated - FIXED: Using onedir mode to avoid struct.error with large GGUF models
 """
 
 import sys
@@ -190,6 +189,8 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.font',
         'tkinter.scrolledtext',
+        'tkinter.messagebox',
+        'tkinter.filedialog',
         
         # Database
         'sqlite3',
@@ -206,11 +207,19 @@ a = Analysis(
         
         # AI/ML
         'torch',
+        'torch.nn',
+        'torch.utils',
         'transformers',
+        'transformers.models',
+        'transformers.models.auto',
         'sentence_transformers',
+        'sentence_transformers.models',
+        'sentence_transformers.util',
         'ctransformers',
         'huggingface_hub',
+        'huggingface_hub.file_download',
         'safetensors',
+        'safetensors.torch',
         'tokenizers',
         
         # Image Processing
@@ -219,6 +228,7 @@ a = Analysis(
         'PIL.ImageTk',
         'PIL.ImageDraw',
         'PIL.ImageFont',
+        'PIL.ImageFilter',
         'cv2',
         
         # Data Science
@@ -227,6 +237,10 @@ a = Analysis(
         'numpy.core._multiarray_umath',
         'scipy',
         'scipy.spatial',
+        'scipy.spatial.distance',
+        'sklearn',
+        'sklearn.metrics',
+        'sklearn.metrics.pairwise',
         
         # Utilities
         'dateutil',
@@ -236,9 +250,24 @@ a = Analysis(
         'sentencepiece',
         'sacremoses',
         'protobuf',
+        'logging',
+        'logging.handlers',
+        'threading',
+        'queue',
         
         # WordPress API
         'wptools',
+        
+        # Core modules
+        'core',
+        'core.database',
+        'core.rss_fetcher',
+        'core.ai_draft_generator',
+        'core.wordpress_api',
+        'core.wordpress_formatter',
+        'core.vision_ai',
+        'core.translator',
+        'core.news_matcher',
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -246,12 +275,15 @@ a = Analysis(
     excludes=[
         # Exclude unnecessary packages to reduce size
         'matplotlib',
+        'matplotlib.pyplot',
         'pandas',
         'jupyter',
         'notebook',
         'IPython',
         'pytest',
         'setuptools',
+        'wheel',
+        'pip',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -261,33 +293,39 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# CRITICAL FIX: Use onedir mode instead of onefile to avoid struct.error with large models
+# This creates a directory with the executable and all dependencies separate
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    [],  # Empty - don't bundle binaries in EXE
+    exclude_binaries=True,  # CRITICAL: Keep binaries separate from executable
     name='{APP_NAME.replace(" ", "")}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,  # No console window (GUI app)
     disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
     icon="{ICON_FILE}" if Path("{ICON_FILE}").exists() else None,
-    version_file=None,
+)
+
+# COLLECT creates the directory structure
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='{APP_NAME.replace(" ", "")}',
 )
 '''
     
     spec_file = Path("nexuzy_installer.spec")
     spec_file.write_text(spec_content)
-    print(f"  ✅ Created {spec_file}")
+    print(f"  ✅ Created {spec_file} (ONEDIR mode - fixes struct.error)")
     return spec_file
 
 def run_pyinstaller(spec_file):
@@ -316,7 +354,9 @@ def test_executable():
     print("\n[6/8] Testing executable...")
     
     exe_name = APP_NAME.replace(" ", "") + ".exe"
-    exe_path = Path("dist") / exe_name
+    # UPDATED: Check in directory instead of root dist folder
+    exe_dir = Path("dist") / APP_NAME.replace(" ", "")
+    exe_path = exe_dir / exe_name
     
     if not exe_path.exists():
         print(f"  ❌ Executable not found: {exe_path}")
@@ -325,22 +365,25 @@ def test_executable():
     size_mb = exe_path.stat().st_size / (1024 * 1024)
     print(f"  ✅ Executable created: {exe_path}")
     print(f"     Size: {size_mb:.1f} MB")
+    print(f"     Directory structure: dist/{APP_NAME.replace(' ', '')}/")
     
     return True
 
 def create_installer_script():
-    """Create Inno Setup script for Windows installer"""
+    """Create Inno Setup script for Windows installer - UPDATED FOR ONEDIR"""
     print("\n[7/8] Creating installer script...")
     
-    iss_content = f'''
-; Inno Setup Script for {APP_NAME}
-; Generated automatically
+    app_dir_name = APP_NAME.replace(" ", "")
+    
+    iss_content = f'''; Inno Setup Script for {APP_NAME}
+; Generated automatically - UPDATED FOR ONEDIR BUILD
 
 #define MyAppName "{APP_NAME}"
 #define MyAppVersion "{APP_VERSION}"
 #define MyAppPublisher "Nexuzy"
 #define MyAppURL "https://github.com/david0154/nexuzy-publisher-desk"
 #define MyAppExeName "{APP_NAME.replace(" ", "")}.exe"
+#define MyAppDirName "{app_dir_name}"
 
 [Setup]
 AppId={{{{B7E9D8C4-5A3F-4B2E-8F1D-9C6E7A4B5D3C}}}}
@@ -350,7 +393,7 @@ AppPublisher={{#MyAppPublisher}}
 AppPublisherURL={{#MyAppURL}}
 AppSupportURL={{#MyAppURL}}
 AppUpdatesURL={{#MyAppURL}}
-DefaultDirName={{autopf}}\\{{#MyAppName}}
+DefaultDirName={{autopf}}\{{#MyAppName}}
 DefaultGroupName={{#MyAppName}}
 AllowNoIcons=yes
 LicenseFile=LICENSE
@@ -369,10 +412,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{{cm:CreateDesktopIcon}}"; GroupDescription: "{{cm:AdditionalIcons}}"
 
 [Files]
-Source: "dist\\{{#MyAppExeName}}"; DestDir: "{{app}}"; Flags: ignoreversion
+; UPDATED: Install entire directory structure from onedir build
+Source: "dist\\{{#MyAppDirName}}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{{app}}"; Flags: ignoreversion
 Source: "LICENSE"; DestDir: "{{app}}"; Flags: ignoreversion
-Source: "models\\*"; DestDir: "{{app}}\\models"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: DirExists('models')
 
 [Icons]
 Name: "{{group}}\\{{#MyAppName}}"; Filename: "{{app}}\\{{#MyAppExeName}}"
@@ -414,14 +457,22 @@ def print_summary():
     print("═" * 60)
     
     exe_name = APP_NAME.replace(" ", "") + ".exe"
-    exe_path = Path("dist") / exe_name
+    app_dir_name = APP_NAME.replace(" ", "")
+    exe_dir = Path("dist") / app_dir_name
+    exe_path = exe_dir / exe_name
     
     if exe_path.exists():
         print("\n✅ BUILD SUCCESSFUL!\n")
+        print(f"📦 Output Directory: {exe_dir}")
         print(f"📦 Executable: {exe_path}")
         
         size_mb = exe_path.stat().st_size / (1024 * 1024)
-        print(f"📊 Size: {size_mb:.1f} MB")
+        print(f"📊 Executable Size: {size_mb:.1f} MB")
+        
+        # Calculate total directory size
+        total_size = sum(f.stat().st_size for f in exe_dir.rglob('*') if f.is_file())
+        total_size_mb = total_size / (1024 * 1024)
+        print(f"📊 Total Directory Size: {total_size_mb:.1f} MB")
         
         # Check if model is included
         model_path = MODEL_DIR / RECOMMENDED_MODEL
@@ -433,14 +484,19 @@ def print_summary():
             print(f"\n⚠️  AI Model: NOT included")
             print(f"   Users will need to download separately")
         
+        print("\n⚠️  IMPORTANT: DIRECTORY BUILD")
+        print(f"   The ENTIRE {exe_dir} directory must be distributed together.")
+        print(f"   Users run: {exe_name} from that directory.")
+        print(f"   This avoids the struct.error with large AI models.")
+        
         print("\n📋 Next Steps:")
         print(f"   1. Test the executable: {exe_path}")
-        print(f"   2. Create installer (optional): nexuzy_installer.iss")
-        print(f"   3. Distribute to users")
+        print(f"   2. Create installer: nexuzy_installer.iss (packages the directory)")
+        print(f"   3. OR zip the entire dist/{app_dir_name}/ folder for distribution")
         
         print("\n💡 Distribution Options:")
-        print("   • ZIP file (portable)")
-        print("   • Inno Setup installer (recommended)")
+        print("   • ZIP the dist/{app_dir_name}/ directory (portable)")
+        print("   • Inno Setup installer (recommended - auto-installs directory)")
         print("   • GitHub Releases")
         
     else:
