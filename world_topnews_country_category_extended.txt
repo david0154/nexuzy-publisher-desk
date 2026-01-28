@@ -1,0 +1,78 @@
+## India
+General: https://timesofindia.indiatimes.com/rssfeedtopstories.cms
+Politics: https://timesofindia.indiatimes.com/rssfeeds/1221656.cms
+Business: https://timesofindia.indiatimes.com/rssfeeds/1898055.cms
+Tech: https://timesofindia.indiatimes.com/rssfeeds/122830304.cms
+Sports: https://timesofindia.indiatimes.com/rssfeeds/4719148.cms
+Entertainment: https://timesofindia.indiatimes.com/rssfeeds/1081479906.cms
+Health: https://timesofindia.indiatimes.com/rssfeeds/26569993.cms
+
+## USA
+General: http://rss.cnn.com/rss/edition.rss
+Politics: http://rss.cnn.com/rss/edition_politics.rss
+Business: http://rss.cnn.com/rss/money_news_international.rss
+Tech: http://rss.cnn.com/rss/edition_technology.rss
+Sports: http://rss.cnn.com/rss/edition_sport.rss
+Entertainment: http://rss.cnn.com/rss/edition_entertainment.rss
+Health: http://rss.cnn.com/rss/edition_health.rss
+
+## UK
+General: https://feeds.bbci.co.uk/news/rss.xml
+Politics: https://feeds.bbci.co.uk/news/politics/rss.xml
+Business: https://feeds.bbci.co.uk/news/business/rss.xml
+Tech: https://feeds.bbci.co.uk/news/technology/rss.xml
+Sports: https://feeds.bbci.co.uk/sport/rss.xml
+Entertainment: https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml
+Health: https://feeds.bbci.co.uk/news/health/rss.xml
+
+## Germany
+General: https://www.tagesschau.de/xml/rss2/
+Politics: https://www.tagesschau.de/xml/rss2_politik/
+Business: https://www.tagesschau.de/xml/rss2_wirtschaft/
+Tech: https://www.tagesschau.de/xml/rss2_netzwelt/
+Sports: https://www.tagesschau.de/xml/rss2_sport/
+# Entertainment/Health: Use general or https://www.dw.com/de/top-stories/s-9097.rss (DW English)
+
+## France
+General: https://www.lemonde.fr/rss/une.xml
+Politics: https://www.lemonde.fr/politique/rss_full.xml
+Business: https://www.lemonde.fr/economie/rss_full.xml
+Tech: https://www.lemonde.fr/pixels/rss_full.xml
+Sports: https://www.lemonde.fr/sport/rss_full.xml
+# Entertainment/Health: https://www.lemonde.fr/culture/rss_full.xml / https://www.lemonde.fr/sante/rss_full.xml
+
+## China (English)
+General: http://www.news.cn/english/rss.htm
+Politics: http://www.news.cn/english/politics/
+Business: http://www.news.cn/english/economy/
+Tech: http://www.news.cn/english/sci-tech/
+# Sports/Ent/Health: Xinhua main or http://www.globaltimes.cn/rss.xml
+
+## Japan (English)
+General: https://www3.nhk.or.jp/nhkworld/en/newslist/rss/news_rss.xml
+Politics: https://www3.nhk.or.jp/nhkworld/en/news/politics/rss.xml
+Business: https://www3.nhk.or.jp/nhkworld/en/news/business/rss.xml
+Tech: https://www3.nhk.or.jp/nhkworld/en/news/science/rss.xml
+Sports: https://www3.nhk.or.jp/nhkworld/en/news/sports/rss.xml
+
+## Brazil
+General: https://www1.folha.uol.com.br/rss/
+Politics: https://www1.folha.uol.com.br/poder/rss/
+Business: https://www1.folha.uol.com.br/mercado/rss/
+Sports: https://www1.folha.uol.com.br/esporte/rss/
+
+## South Africa
+General: https://www.news24.com/Feed
+Politics: https://www.news24.com/news24/SouthAfrica/rss
+Business: https://www.news24.com/fin24/rss
+Sports: https://www.news24.com/sport/rss
+
+## Australia
+General: https://www.abc.net.au/news/feed
+Politics: https://www.abc.net.au/news/politics/feed
+Business: https://www.abc.net.au/news/business/feed
+Tech: https://www.abc.net.au/news/science/feed
+Sports: https://www.abc.net.au/news/sport/feed
+
+## Sample Per-Country Files
+**File: `USA-Tech.txt`**  
