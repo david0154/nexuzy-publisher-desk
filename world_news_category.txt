@@ -1,0 +1,44 @@
+## World News (Global Top Sources)
+
+### General
+- https://feeds.bbci.co.uk/news/world/rss.xml
+- http://rss.cnn.com/rss/edition_world.rss
+- https://www.theguardian.com/world/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+- http://feeds.reuters.com/Reuters/worldNews
+
+### Politics
+- https://feeds.bbci.co.uk/news/politics/rss.xml
+- http://rss.cnn.com/rss/edition_worldpolitics.rss
+- https://www.theguardian.com/politics/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml
+
+### Business
+- https://feeds.bbci.co.uk/news/business/rss.xml
+- http://rss.cnn.com/rss/money_news_international.rss
+- https://www.theguardian.com/business/rss
+- http://feeds.reuters.com/reuters/businessNews
+
+### Tech
+- https://feeds.bbci.co.uk/news/technology/rss.xml
+- http://rss.cnn.com/rss/edition_technology.rss
+- https://www.theguardian.com/technology/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
+
+### Sports
+- https://feeds.bbci.co.uk/sport/rss.xml
+- http://rss.cnn.com/rss/edition_sport.rss
+- https://www.theguardian.com/sport/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml
+
+### Entertainment
+- https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml
+- http://rss.cnn.com/rss/edition_entertainment.rss
+- https://www.theguardian.com/film/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml
+
+### Health
+- https://feeds.bbci.co.uk/news/health/rss.xml
+- http://rss.cnn.com/rss/edition_health.rss
+- https://www.theguardian.com/society/rss
+- https://rss.nytimes.com/services/xml/rss/nyt/Health.xml
