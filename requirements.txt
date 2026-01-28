@@ -25,9 +25,11 @@ beautifulsoup4>=4.12.2
 lxml>=4.9.3
 python-dateutil==2.8.2
 
-# UI
+# Image Processing (Enhanced for Vision AI)
 pillow>=10.1.0
 opencv-python==4.9.0.80
+scipy>=1.11.0
+scikit-image>=0.22.0
 
 # Database (sqlite3 is built-in)
 
