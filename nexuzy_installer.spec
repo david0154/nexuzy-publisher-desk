@@ -8,6 +8,8 @@ Builds standalone Windows executable with:
 
 Usage:
     pyinstaller --clean --noconfirm nexuzy_installer.spec
+
+FIX: Changed from onefile to onedir mode to avoid struct.error with large models
 """
 
 import sys
@@ -240,39 +242,52 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# FIXED: Changed to directory-based build (onedir) to avoid struct.error with large models
+# Instead of bundling everything into one executable, we create a directory with:
+# - NexuzyPublisherDesk.exe (small launcher)
+# - _internal/ directory (contains all dependencies and models)
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    [],  # Empty - don't bundle binaries here
+    exclude_binaries=True,  # CRITICAL FIX: Don't bundle in EXE, keep separate
     name='NexuzyPublisherDesk',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,  # Compress with UPX (disable if UPX not available)
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,  # No console window - GUI only
     disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
     icon='resources/logo.ico' if Path('resources/logo.ico').exists() else None,
+)
+
+# COLLECT creates the directory structure
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='NexuzyPublisherDesk',
 )
 
 print("\n" + "="*60)
 print("BUILD SUMMARY")
 print("="*60)
-print(f"Executable: dist/NexuzyPublisherDesk.exe")
+print(f"Output: dist/NexuzyPublisherDesk/ (directory)")
+print(f"Executable: dist/NexuzyPublisherDesk/NexuzyPublisherDesk.exe")
 print(f"Data files included: {len(datas)} directories")
 print("\nModels bundled:")
 print("  - GGUF models (if in models/)")
 print("  - Sentence Transformer models")
 print("  - Tokenizers and configs")
+print("\nBuild mode: ONEDIR (fixes struct.error with large models)")
+print("The entire dist/NexuzyPublisherDesk/ directory must be distributed together.")
 print("\nNext steps:")
-print("  1. Test: dist/NexuzyPublisherDesk.exe")
-print("  2. Create installer: nexuzy_installer.iss (optional)")
+print("  1. Test: dist/NexuzyPublisherDesk/NexuzyPublisherDesk.exe")
+print("  2. Create installer: Use Inno Setup to package the directory")
 print("  3. Distribute to users")
 print("="*60 + "\n")
