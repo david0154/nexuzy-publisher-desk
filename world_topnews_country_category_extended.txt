@@ -74,5 +74,4 @@ Business: https://www.abc.net.au/news/business/feed
 Tech: https://www.abc.net.au/news/science/feed
 Sports: https://www.abc.net.au/news/sport/feed
 
-## Sample Per-Country Files
-**File: `USA-Tech.txt`**  
+
