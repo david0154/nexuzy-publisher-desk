@@ -1,23 +1,24 @@
 """ 
-RSS Manager - ULTIMATE IMAGE SEARCH WITH PERPLEXITY AI (FIXED)
-Fetches news from RSS feeds with 4-level intelligent image fallback:
-- Level 1: 8 RSS image extraction methods
+RSS Manager - IMPROVED IMAGE EXTRACTION (11 Methods!)
+Fetches news from RSS feeds with comprehensive image extraction:
+- Level 1: 11 RSS image extraction methods (IMPROVED!)
 - Level 2: Free stock photos (Unsplash/Pixabay)
-- Level 3: 🆕 PERPLEXITY AI WEB SEARCH (ultimate fallback!)
-- Level 4: Placeholder (rarely needed now)
+- Level 3: PERPLEXITY AI WEB SEARCH
+- Level 4: Placeholder
 
 FEATURES:
 ✅ URL-based duplicate detection
 ✅ Headline similarity checking  
 ✅ 48-hour automatic cleanup
 ✅ AI-powered image discovery
+✅ Debug logging for troubleshooting
 """
 
 import sqlite3
 import logging
 import hashlib
 from datetime import datetime, timedelta
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, urljoin
 import re
 import json
 import os
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 class RSSManager:
-    """Manage RSS feeds with 4-level image search including Perplexity AI"""
+    """Manage RSS feeds with comprehensive image extraction"""
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
@@ -44,21 +45,15 @@ class RSSManager:
         self.enable_web_search = True
         self.enable_perplexity_search = True
         self.perplexity_api_key = self._load_perplexity_api_key()
+        self.debug_mode = False  # Set to True to see detailed RSS entry info
     
     def _load_perplexity_api_key(self):
-        """
-        Load Perplexity API key from:
-        1. Environment variable (PERPLEXITY_API_KEY)
-        2. config.json file
-        3. .env file
-        """
-        # Try environment variable first
+        """Load Perplexity API key"""
         api_key = os.getenv('PERPLEXITY_API_KEY')
         if api_key:
             logger.info("✅ Loaded Perplexity API key from environment")
             return api_key
         
-        # Try config.json
         try:
             config_path = Path('config.json')
             if config_path.exists():
@@ -71,7 +66,6 @@ class RSSManager:
         except Exception as e:
             logger.debug(f"Could not load from config.json: {e}")
         
-        # Try .env file
         try:
             env_path = Path('.env')
             if env_path.exists():
@@ -84,8 +78,27 @@ class RSSManager:
         except Exception as e:
             logger.debug(f"Could not load from .env: {e}")
         
-        logger.warning("⚠️ Perplexity API key not found. Add to config.json or environment variable.")
+        logger.warning("⚠️ Perplexity API key not found")
         return None
+    
+    def _make_absolute_url(self, base_url, image_url):
+        """Convert relative URL to absolute URL"""
+        if not image_url:
+            return None
+        
+        # Already absolute
+        if image_url.startswith(('http://', 'https://')):
+            return image_url
+        
+        # Protocol-relative URL
+        if image_url.startswith('//'):
+            return 'https:' + image_url
+        
+        # Relative URL
+        try:
+            return urljoin(base_url, image_url)
+        except:
+            return None
     
     def _generate_url_hash(self, url):
         """Generate unique hash for URL deduplication"""
@@ -215,18 +228,17 @@ class RSSManager:
         if not url_lower.startswith(('http://', 'https://')):
             return False
         
+        # Check for image file extensions or image-related paths
         image_indicators = [
-            '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
-            '/image/', '/images/', '/img/', '/media/',
-            'image=', 'img=', 'photo', 'picture'
+            '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+            '/image/', '/images/', '/img/', '/media/', '/photo/', '/photos/',
+            'image=', 'img=', 'photo', 'picture', 'thumbnail'
         ]
         
         return any(indicator in url_lower for indicator in image_indicators)
     
     def _extract_search_keywords(self, headline):
-        """
-        Extract clean keywords from headline
-        """
+        """Extract clean keywords from headline"""
         stop_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
                       'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
                       'says', 'announces', 'launches', 'reports', 'reveals']
@@ -237,17 +249,13 @@ class RSSManager:
         return ' '.join(keywords[:4])
     
     def _search_perplexity_images(self, headline, category=""):
-        """
-        🆕 PERPLEXITY AI IMAGE SEARCH - Ultimate fallback! (FIXED)
-        Uses Perplexity API to find relevant images across the web
-        """
+        """Perplexity AI image search"""
         try:
             if not self.perplexity_api_key:
                 return None
             
             logger.info(f"🤖 Perplexity AI searching for: '{headline[:60]}...'")
             
-            # Construct search query
             search_query = f"Find a high quality, copyright-free image URL (direct link to .jpg, .png, or .webp) for this news headline: {headline}"
             if category:
                 search_query += f" Category: {category}. "
@@ -258,7 +266,6 @@ class RSSManager:
                 "Content-Type": "application/json"
             }
             
-            # 🔧 FIXED: Simplified payload without unsupported parameters
             payload = {
                 "model": "llama-3.1-sonar-small-128k-online",
                 "messages": [
@@ -291,17 +298,14 @@ class RSSManager:
                     content = result['choices'][0]['message']['content'].strip()
                     logger.debug(f"Perplexity response: {content[:200]}")
                     
-                    # Extract URL from response
+                    # Extract URL
                     url_pattern = r'https?://[^\s<>"\)\]]+?\.(jpg|jpeg|png|gif|webp)(?:\?[^\s<>"\)\]]*)?'
                     urls = re.findall(url_pattern, content, re.IGNORECASE)
                     
                     if urls:
-                        # Reconstruct full URL
                         for match in urls:
-                            # Find the full URL in content
                             start_idx = content.find('http')
                             if start_idx != -1:
-                                # Find end of URL
                                 end_idx = start_idx
                                 for char in content[start_idx:]:
                                     if char in [' ', '\n', ')', ']', '"', "'"]:
@@ -313,7 +317,6 @@ class RSSManager:
                                     logger.info(f"✅ Perplexity AI found: {full_url[:80]}")
                                     return full_url
                     
-                    # If no pattern match, try to extract any URL
                     simple_urls = re.findall(r'https?://[^\s<>"\)\]]+', content)
                     for url in simple_urls:
                         if self._is_valid_image_url(url):
@@ -335,19 +338,15 @@ class RSSManager:
             
         except Exception as e:
             logger.error(f"❌ Perplexity search error: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
             return None
     
     def _search_free_stock_images(self, query, headline_full=""):
-        """
-        Search free stock photo sites
-        """
+        """Search free stock photo sites"""
         try:
             search_query = headline_full[:80] if headline_full else query
             logger.info(f"🔍 Web searching images for: '{search_query}'")
             
-            # Try Unsplash with full title
+            # Try Unsplash
             try:
                 clean_query = re.sub(r'[^a-zA-Z0-9\s]', '', search_query)
                 unsplash_url = f"https://source.unsplash.com/1200x630/?{quote(clean_query)}"
@@ -360,7 +359,7 @@ class RSSManager:
             except Exception as e:
                 logger.debug(f"Unsplash title search failed: {e}")
             
-            # Fallback: Try with keywords
+            # Fallback: keywords
             if headline_full:
                 try:
                     keywords = self._extract_search_keywords(headline_full)
@@ -382,37 +381,57 @@ class RSSManager:
             logger.error(f"❌ Web search error: {e}")
             return None
     
-    def extract_image_from_entry(self, entry, headline="", category=""):
+    def extract_image_from_entry(self, entry, headline="", category="", feed_url=""):
         """
-        Extract image URL with 4-level search
+        🔍 IMPROVED: Extract image with 11 methods + debug logging
         """
         image_url = None
         method_used = None
         
-        # LEVEL 1: RSS extraction (8 methods)
+        # 🐛 DEBUG: Show what's available in this RSS entry
+        if self.debug_mode:
+            logger.debug(f"\n{'='*60}")
+            logger.debug(f"DEBUG: Entry for '{headline[:50]}...'")
+            logger.debug(f"DEBUG: Entry keys: {list(entry.keys())}")
+            logger.debug(f"DEBUG: Has media_content: {hasattr(entry, 'media_content')}")
+            logger.debug(f"DEBUG: Has media_thumbnail: {hasattr(entry, 'media_thumbnail')}")
+            logger.debug(f"DEBUG: Has enclosures: {hasattr(entry, 'enclosures')}")
+            logger.debug(f"DEBUG: Has content: {hasattr(entry, 'content')}")
+            logger.debug(f"{'='*60}\n")
+        
+        # Method 1: media:content tags
         if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
                 if 'image' in media.get('type', '').lower():
                     image_url = media.get('url')
-                    if self._is_valid_image_url(image_url):
-                        method_used = "media:content"
-                        break
+                    if image_url:
+                        image_url = self._make_absolute_url(feed_url, image_url)
+                        if self._is_valid_image_url(image_url):
+                            method_used = "media:content"
+                            break
         
+        # Method 2: media:thumbnail
         if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
             if isinstance(entry.media_thumbnail, list) and len(entry.media_thumbnail) > 0:
                 image_url = entry.media_thumbnail[0].get('url')
-                if self._is_valid_image_url(image_url):
-                    method_used = "media:thumbnail"
+                if image_url:
+                    image_url = self._make_absolute_url(feed_url, image_url)
+                    if self._is_valid_image_url(image_url):
+                        method_used = "media:thumbnail"
         
+        # Method 3: Enclosures
         if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
             for enclosure in entry.enclosures:
                 enc_type = enclosure.get('type', '').lower()
                 enc_url = enclosure.get('href', '')
-                if 'image' in enc_type or self._is_valid_image_url(enc_url):
-                    image_url = enc_url
-                    method_used = "enclosure"
-                    break
+                if enc_url:
+                    enc_url = self._make_absolute_url(feed_url, enc_url)
+                    if 'image' in enc_type or self._is_valid_image_url(enc_url):
+                        image_url = enc_url
+                        method_used = "enclosure"
+                        break
         
+        # Method 4: Summary/description HTML <img>
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -420,18 +439,94 @@ class RSSManager:
                 img_tag = soup.find('img')
                 if img_tag and img_tag.get('src'):
                     image_url = img_tag.get('src')
+                    image_url = self._make_absolute_url(feed_url, image_url)
                     if self._is_valid_image_url(image_url):
                         method_used = "summary <img>"
         
+        # Method 5: Content HTML <img>
         if not image_url and hasattr(entry, 'content') and entry.content:
             for content in entry.content:
                 soup = BeautifulSoup(content.get('value', ''), 'html.parser')
                 img_tag = soup.find('img')
                 if img_tag and img_tag.get('src'):
                     image_url = img_tag.get('src')
+                    image_url = self._make_absolute_url(feed_url, image_url)
                     if self._is_valid_image_url(image_url):
                         method_used = "content <img>"
                         break
+        
+        # Method 6: content:encoded (common in WordPress RSS)
+        if not image_url and hasattr(entry, 'content_encoded'):
+            soup = BeautifulSoup(entry.content_encoded, 'html.parser')
+            img_tag = soup.find('img')
+            if img_tag and img_tag.get('src'):
+                image_url = img_tag.get('src')
+                image_url = self._make_absolute_url(feed_url, image_url)
+                if self._is_valid_image_url(image_url):
+                    method_used = "content:encoded <img>"
+        
+        # Method 7: Direct 'image' field
+        if not image_url and hasattr(entry, 'image'):
+            if isinstance(entry.image, dict):
+                image_url = entry.image.get('href', entry.image.get('url', ''))
+            elif isinstance(entry.image, str):
+                image_url = entry.image
+            
+            if image_url:
+                image_url = self._make_absolute_url(feed_url, image_url)
+                if self._is_valid_image_url(image_url):
+                    method_used = "direct image field"
+        
+        # Method 8: OpenGraph images
+        if not image_url:
+            summary = entry.get('summary', entry.get('description', ''))
+            if summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                og_image = soup.find('meta', property='og:image') or soup.find('meta', attrs={'property': 'og:image'})
+                if og_image and og_image.get('content'):
+                    image_url = og_image.get('content')
+                    image_url = self._make_absolute_url(feed_url, image_url)
+                    if self._is_valid_image_url(image_url):
+                        method_used = "og:image meta"
+        
+        # Method 9: Twitter Card images
+        if not image_url:
+            summary = entry.get('summary', entry.get('description', ''))
+            if summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                twitter_image = soup.find('meta', attrs={'name': 'twitter:image'}) or soup.find('meta', property='twitter:image')
+                if twitter_image and twitter_image.get('content'):
+                    image_url = twitter_image.get('content')
+                    image_url = self._make_absolute_url(feed_url, image_url)
+                    if self._is_valid_image_url(image_url):
+                        method_used = "twitter:image meta"
+        
+        # Method 10: Any <meta> tag with 'image' in name
+        if not image_url:
+            summary = entry.get('summary', entry.get('description', ''))
+            if summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                meta_tags = soup.find_all('meta')
+                for meta in meta_tags:
+                    meta_name = (meta.get('name', '') + meta.get('property', '')).lower()
+                    if 'image' in meta_name and meta.get('content'):
+                        image_url = meta.get('content')
+                        image_url = self._make_absolute_url(feed_url, image_url)
+                        if self._is_valid_image_url(image_url):
+                            method_used = f"meta tag ({meta.get('name') or meta.get('property')})"
+                            break
+        
+        # Method 11: Link tags with image rel
+        if not image_url and hasattr(entry, 'links'):
+            for link in entry.links:
+                if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
+                    link_url = link.get('href')
+                    if link_url:
+                        link_url = self._make_absolute_url(feed_url, link_url)
+                        if self._is_valid_image_url(link_url):
+                            image_url = link_url
+                            method_used = "link rel=image"
+                            break
         
         # LEVEL 2: Free stock photos
         if not image_url and self.enable_web_search and headline:
@@ -451,7 +546,7 @@ class RSSManager:
                 image_url = perplexity_image
                 method_used = "Perplexity AI"
         
-        # Validation
+        # Final validation
         if image_url and not self._is_valid_image_url(image_url):
             logger.debug(f"❌ Invalid image URL: {image_url[:80]}")
             image_url = None
@@ -462,11 +557,13 @@ class RSSManager:
             logger.info(f"✅ Image via [{method_used}]: {image_url[:80]}")
         else:
             logger.warning(f"⚠️ NO IMAGE: {headline[:60]}")
+            if self.debug_mode:
+                logger.debug("💡 TIP: Set self.debug_mode = True to see available RSS fields")
         
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
-        """Fetch news with 4-level image search"""
+        """Fetch news with improved image extraction"""
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4")
@@ -547,15 +644,15 @@ class RSSManager:
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # 4-LEVEL IMAGE SEARCH
-                        image_url = self.extract_image_from_entry(entry, headline, category)
+                        # 11-METHOD IMAGE EXTRACTION
+                        image_url = self.extract_image_from_entry(entry, headline, category, feed_url)
                         
                         # Track source
                         if image_url:
-                            if 'perplexity' in str(image_url).lower() or any(x in str(method_used or '').lower() for x in ['ai', 'perplexity']):
-                                img_ai += 1
-                            elif 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower() or 'pexels' in image_url.lower():
+                            if 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower() or 'pexels' in image_url.lower():
                                 img_stock += 1
+                            elif 'perplexity' in str(image_url).lower():
+                                img_ai += 1
                             else:
                                 img_rss += 1
                         else:
