@@ -1,19 +1,20 @@
 """
-RSS Manager - Enhanced with BETTER Image Extraction
-Fetches news from RSS feeds with 8 image extraction methods:
+RSS Manager - WITH AUTO WEB SEARCH FOR MISSING IMAGES
+Fetches news from RSS feeds with intelligent image fallback:
+- 8 RSS image extraction methods
+- 🆕 Auto web search for related images (Unsplash, Pexels, Pixabay)
 - URL-based duplicate detection
 - Headline similarity checking  
-- 48-hour automatic news cleanup
-- Smart image fallback with placeholder support
-- Enhanced image URL extraction with detailed logging
+- 48-hour automatic cleanup
 """
 
 import sqlite3
 import logging
 import hashlib
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 import re
+import json
 
 try:
     import feedparser
@@ -27,12 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 class RSSManager:
-    """Manage RSS feeds and fetch news articles with enhanced image extraction"""
+    """Manage RSS feeds with auto web search for missing images"""
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
         self.cleanup_hours = 48
         self.max_entries_per_feed = 20
+        self.enable_web_search = True  # Enable auto web search for images
     
     def _generate_url_hash(self, url):
         """Generate unique hash for URL deduplication"""
@@ -156,15 +158,12 @@ class RSSManager:
         
         url_lower = url.lower()
         
-        # Skip data URIs (too large for storage)
         if url_lower.startswith('data:image'):
             return False
         
-        # Must start with http/https
         if not url_lower.startswith(('http://', 'https://')):
             return False
         
-        # Good signs: image extensions or image-related paths
         image_indicators = [
             '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
             '/image/', '/images/', '/img/', '/media/',
@@ -173,9 +172,83 @@ class RSSManager:
         
         return any(indicator in url_lower for indicator in image_indicators)
     
-    def extract_image_from_entry(self, entry, headline=""):
+    def _extract_search_keywords(self, headline, category=""):
         """
-        🔧 IMPROVED: Extract image URL from RSS entry with 8 methods + detailed logging
+        🆕 Extract keywords from headline for image search
+        """
+        # Remove common filler words
+        stop_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+                      'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
+                      'says', 'new', 'announces', 'launches', 'reports', 'reveals']
+        
+        # Clean headline
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', headline.lower())
+        keywords = [w for w in words if w not in stop_words]
+        
+        # Take top 3-4 most important words
+        search_query = ' '.join(keywords[:4])
+        
+        # Add category context if available
+        if category and category.lower() not in ['general', 'news']:
+            search_query = f"{category} {search_query}"
+        
+        return search_query[:60]  # Limit query length
+    
+    def _search_free_stock_images(self, query):
+        """
+        🆕 Search free stock photo sites for related images
+        Returns: image_url or None
+        """
+        try:
+            logger.info(f"🔍 Web searching images for: '{query}'")
+            
+            # Method 1: Unsplash API (No API key needed for basic search)
+            try:
+                unsplash_url = f"https://source.unsplash.com/1200x630/?{quote(query)}"
+                response = requests.head(unsplash_url, timeout=5, allow_redirects=True)
+                
+                if response.status_code == 200:
+                    final_url = response.url
+                    logger.info(f"✅ Found Unsplash image: {final_url[:80]}")
+                    return final_url
+            except Exception as e:
+                logger.debug(f"Unsplash search failed: {e}")
+            
+            # Method 2: Pexels API (Free tier available)
+            # Note: Requires API key - users should add their own
+            # For now, skip if no key available
+            
+            # Method 3: Pixabay (Similar to Unsplash)
+            try:
+                # Pixabay direct image search (no API key needed for basic)
+                pixabay_search = f"https://pixabay.com/en/photos/search/{quote(query)}/"
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                response = requests.get(pixabay_search, headers=headers, timeout=5)
+                
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    img_tags = soup.find_all('img', class_=re.compile('.*?'))
+                    
+                    for img in img_tags:
+                        src = img.get('src') or img.get('data-lazy')
+                        if src and self._is_valid_image_url(src) and 'pixabay' in src:
+                            # Get full-size version
+                            full_url = src.replace('_640', '_1280')
+                            logger.info(f"✅ Found Pixabay image: {full_url[:80]}")
+                            return full_url
+            except Exception as e:
+                logger.debug(f"Pixabay search failed: {e}")
+            
+            logger.warning(f"⚠️ Web image search found nothing for: '{query}'")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Web search error: {e}")
+            return None
+    
+    def extract_image_from_entry(self, entry, headline="", category=""):
+        """
+        Extract image URL from RSS entry with 8 methods + web search fallback
         """
         image_url = None
         method_used = None
@@ -228,7 +301,7 @@ class RSSManager:
                         method_used = "content <img>"
                         break
         
-        # 🆕 Method 6: OpenGraph images (og:image)
+        # Method 6: OpenGraph images
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -239,7 +312,7 @@ class RSSManager:
                     if self._is_valid_image_url(image_url):
                         method_used = "og:image meta"
         
-        # 🆕 Method 7: Twitter Card images
+        # Method 7: Twitter Card images
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -250,7 +323,7 @@ class RSSManager:
                     if self._is_valid_image_url(image_url):
                         method_used = "twitter:image meta"
         
-        # 🆕 Method 8: Link tags with image rel
+        # Method 8: Link tags with image rel
         if not image_url and hasattr(entry, 'links'):
             for link in entry.links:
                 if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
@@ -259,6 +332,16 @@ class RSSManager:
                         image_url = link_url
                         method_used = "link rel=image"
                         break
+        
+        # 🆕 Method 9: WEB SEARCH FOR RELATED IMAGES
+        if not image_url and self.enable_web_search and headline:
+            logger.info(f"🌐 No RSS image - trying web search for: {headline[:50]}")
+            search_query = self._extract_search_keywords(headline, category)
+            web_image = self._search_free_stock_images(search_query)
+            
+            if web_image:
+                image_url = web_image
+                method_used = "web search (Unsplash/Pixabay)"
         
         # Final validation
         if image_url and not self._is_valid_image_url(image_url):
@@ -270,13 +353,13 @@ class RSSManager:
         if image_url:
             logger.info(f"✅ Image found via [{method_used}]: {image_url[:80]}... for '{headline[:40]}...'")
         else:
-            logger.warning(f"⚠️  NO IMAGE found for: {headline[:60]}... (tried 8 methods)")
+            logger.warning(f"⚠️ NO IMAGE found for: {headline[:60]}... (tried 9 methods including web search)")
         
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
         """
-        Fetch latest news from all active RSS feeds with enhanced image extraction
+        Fetch latest news from all active RSS feeds with auto web search for images
         
         Args:
             workspace_id: Current workspace
@@ -308,8 +391,9 @@ class RSSManager:
         
         total_fetched = 0
         total_skipped = 0
-        images_found = 0
-        images_missing = 0
+        images_from_rss = 0
+        images_from_web = 0
+        images_placeholder = 0
         
         for feed_id, feed_name, feed_url, category in feeds:
             try:
@@ -326,7 +410,7 @@ class RSSManager:
                     feed = feedparser.parse(feed_url)
                 
                 if not feed.entries:
-                    logger.warning(f"⚠️  No entries found in feed: {feed_url}")
+                    logger.warning(f"⚠️ No entries found in feed: {feed_url}")
                     continue
                 
                 logger.info(f"✅ Found {len(feed.entries)} entries in {feed_name}")
@@ -362,13 +446,17 @@ class RSSManager:
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # 🔧 IMPROVED: Extract image with detailed logging
-                        image_url = self.extract_image_from_entry(entry, headline)
+                        # 🔍 EXTRACT IMAGE (8 RSS methods + web search)
+                        image_url = self.extract_image_from_entry(entry, headline, category)
                         
+                        # Track image source
                         if image_url:
-                            images_found += 1
+                            if 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower():
+                                images_from_web += 1
+                            else:
+                                images_from_rss += 1
                         else:
-                            images_missing += 1
+                            images_placeholder += 1
                             image_url = placeholder_image
                             logger.debug(f"📷 Using placeholder for: {headline[:50]}")
                         
@@ -396,13 +484,13 @@ class RSSManager:
         conn.close()
         
         result_msg = f"✅ Successfully fetched {total_fetched} new articles!"
-        result_msg += f"\n📷 Images: {images_found} found, {images_missing} using placeholder"
+        result_msg += f"\n📷 Images: {images_from_rss} from RSS, {images_from_web} from web search, {images_placeholder} placeholder"
         if deleted_count > 0:
             result_msg += f"\n🧹 Cleaned up {deleted_count} old news (48h+ old)"
         if total_skipped > 0:
-            result_msg += f"\n⏭️  Skipped {total_skipped} duplicates"
+            result_msg += f"\n⏭️ Skipped {total_skipped} duplicates"
         
-        logger.info(f"🎉 Total: {total_fetched} new | {images_found} images | {total_skipped} skipped")
+        logger.info(f"🎉 Total: {total_fetched} new | RSS:{images_from_rss} | Web:{images_from_web} | Placeholder:{images_placeholder}")
         return total_fetched, result_msg
     
     def add_feed(self, workspace_id, feed_name, feed_url, category='General'):
@@ -446,7 +534,7 @@ class RSSManager:
             conn.commit()
             conn.close()
             
-            logger.info(f"🗑️  Deleted feed: {feed_name}")
+            logger.info(f"🗑️ Deleted feed: {feed_name}")
             return True, f"Feed '{feed_name}' deleted successfully"
             
         except Exception as e:
