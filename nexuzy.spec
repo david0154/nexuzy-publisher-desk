@@ -25,6 +25,17 @@ block_cipher = None
 
 # Collect all hidden imports
 hiddenimports = [
+    # FIX: pkg_resources dependencies
+    'pkg_resources',
+    'pkg_resources.py2_warn',
+    'jaraco',
+    'jaraco.text',
+    'jaraco.functools',
+    'jaraco.context',
+    'jaraco.classes',
+    'importlib_metadata',
+    'zipp',
+    
     # Core dependencies
     'feedparser',
     'requests',
@@ -49,7 +60,7 @@ hiddenimports = [
     'huggingface_hub',
     'sentence_transformers',
     
-    # AI/ML - Article Writing (llama-cpp)
+    # AI/ML - Article Writing (ctransformers)
     'ctransformers',
     'ctransformers.llm',
     
@@ -102,12 +113,52 @@ hiddenimports = [
     'numpy',
 ]
 
+# Collect all submodules for problematic packages
+try:
+    hiddenimports += collect_submodules('jaraco')
+except:
+    pass
+
+try:
+    hiddenimports += collect_submodules('pkg_resources')
+except:
+    pass
+
+try:
+    hiddenimports += collect_submodules('importlib_metadata')
+except:
+    pass
+
 # Collect all data files
 datas = []
 
 print("\n" + "="*80)
 print("📦 COLLECTING DEPENDENCIES")
 print("="*80)
+
+# Add pkg_resources data
+try:
+    print("⏳ Collecting pkg_resources...")
+    datas += collect_data_files('pkg_resources')
+    print("✅ pkg_resources collected")
+except Exception as e:
+    print(f"⚠️  pkg_resources: {e}")
+
+# Add jaraco data
+try:
+    print("⏳ Collecting jaraco...")
+    datas += collect_data_files('jaraco')
+    print("✅ jaraco collected")
+except Exception as e:
+    print(f"⚠️  jaraco: {e}")
+
+# Add importlib_metadata data
+try:
+    print("⏳ Collecting importlib_metadata...")
+    datas += collect_data_files('importlib_metadata')
+    print("✅ importlib_metadata collected")
+except Exception as e:
+    print(f"⚠️  importlib_metadata: {e}")
 
 # Add transformers data
 try:
@@ -288,7 +339,7 @@ a = Analysis(
         'notebook',
         'jupyter',
         'pytest',
-        'setuptools',
+        'setuptools._distutils',  # Changed: keep setuptools but exclude _distutils
         'distutils',
         'test',
         'tests',
