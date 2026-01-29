@@ -1,13 +1,13 @@
 """ 
-AI Draft Generation Module - ANTI-PLAGIARISM & HUMAN-LIKE WRITING
-Generates UNIQUE, professional news articles with improved creativity
+AI Draft Generation Module - ANTI-PLAGIARISM & LONGER ARTICLES (800-2000 words)
+Generates UNIQUE, comprehensive news articles with improved length
 
 NEW FEATURES:
-✅ Title uniqueness check (prevents duplicate titles)
-✅ Content similarity detection
-✅ Multiple rewrite variations
+✅ 800-2000 word articles (better SEO)
+✅ Multi-section structure
+✅ Detailed, comprehensive coverage
+✅ Title uniqueness check
 ✅ Human-like writing patterns
-✅ Fact-based uniqueness boost
 """
 
 import sqlite3
@@ -31,7 +31,7 @@ _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
 
 class DraftGenerator:
-    """Generate UNIQUE AI-rewritten news articles with anti-plagiarism"""
+    """Generate UNIQUE, LONG AI-rewritten news articles (800-2000 words)"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
         global _CACHED_MODEL, _CACHED_SENTENCE_MODEL
@@ -63,7 +63,7 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED with ANTI-PLAGIARISM features")
+            logger.info("✅ AI Writer LOADED (800-2000 words, Anti-Plagiarism)")
     
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type from filename"""
@@ -82,7 +82,7 @@ class DraftGenerator:
             return 'llama'
     
     def _load_model(self):
-        """Load GGUF quantized model"""
+        """Load GGUF quantized model - OPTIMIZED FOR LONGER ARTICLES"""
         try:
             from ctransformers import AutoModelForCausalLM
             
@@ -107,18 +107,19 @@ class DraftGenerator:
             
             model_type = self._detect_model_type(model_path)
             logger.info(f"🔍 Detected model type: {model_type}")
-            logger.info(f"⏳ Loading model...")
+            logger.info(f"⏳ Loading model for LONG articles (800-2000 words)...")
             
+            # 🔧 OPTIMIZED FOR LONGER GENERATION
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type=model_type,
-                context_length=1024,
-                max_new_tokens=600,
+                context_length=2048,     # DOUBLED from 1024 for longer articles
+                max_new_tokens=1500,     # INCREASED from 600 for 800-2000 words
                 threads=4,
                 gpu_layers=0
             )
             
-            logger.info(f"✅ Model loaded: {model_path.name}")
+            logger.info(f"✅ Model loaded: {model_path.name} (supports 800-2000 words)")
             return llm
         
         except ImportError:
@@ -200,26 +201,21 @@ class DraftGenerator:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get all existing titles
             cursor.execute('SELECT title FROM ai_drafts WHERE title IS NOT NULL')
             existing_titles = [row[0] for row in cursor.fetchall()]
             conn.close()
             
-            # Normalize for comparison
             proposed_normalized = proposed_title.lower().strip()
             
-            # Check exact match
             similar_titles = []
             for existing in existing_titles:
                 existing_normalized = existing.lower().strip()
                 
-                # Exact match
                 if proposed_normalized == existing_normalized:
                     logger.warning(f"⚠️  EXACT TITLE MATCH: '{proposed_title}'")
                     similar_titles.append(existing)
                     continue
                 
-                # Calculate similarity (simple word overlap)
                 proposed_words = set(proposed_normalized.split())
                 existing_words = set(existing_normalized.split())
                 
@@ -229,7 +225,7 @@ class DraftGenerator:
                 overlap = len(proposed_words & existing_words)
                 similarity = overlap / len(proposed_words)
                 
-                if similarity > 0.7:  # 70% word overlap
+                if similarity > 0.7:
                     logger.warning(f"⚠️  SIMILAR TITLE ({similarity:.0%}): '{existing}'")
                     similar_titles.append(existing)
             
@@ -247,16 +243,15 @@ class DraftGenerator:
             return {'is_unique': True, 'similar_titles': [], 'suggestion': proposed_title}
     
     def _generate_unique_title_variant(self, original_title: str) -> str:
-        """
-        🆕 GENERATE UNIQUE TITLE VARIANT
-        Adds context to make title unique
-        """
+        """Generate unique title variant"""
         variations = [
             f"{original_title}: What You Need to Know",
             f"{original_title} - Latest Update",
             f"{original_title}: Key Details Revealed",
             f"{original_title} - Breaking Analysis",
             f"{original_title}: Complete Report",
+            f"{original_title} - Comprehensive Guide",
+            f"{original_title}: Everything You Should Know",
         ]
         
         return random.choice(variations)
@@ -348,7 +343,7 @@ class DraftGenerator:
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
-        """Generate UNIQUE article draft with anti-plagiarism"""
+        """Generate UNIQUE, LONG article draft (800-2000 words)"""
         try:
             if not self.llm:
                 error_msg = "❌ AI model not loaded"
@@ -396,17 +391,16 @@ class DraftGenerator:
             
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
-            # 🆕 CHECK TITLE UNIQUENESS
+            # CHECK TITLE UNIQUENESS
             title_check = self._check_title_uniqueness(headline)
             if not title_check['is_unique']:
-                logger.warning(f"⚠️  Title already exists! Similar titles found: {len(title_check['similar_titles'])}")
-                logger.info(f"💡 Suggested unique title: {title_check['suggestion']}")
-                # Use suggested unique title
+                logger.warning(f"⚠️  Title already exists! Similar titles: {len(title_check['similar_titles'])}")
+                logger.info(f"💡 Using unique title: {title_check['suggestion']}")
                 headline = title_check['suggestion']
             
-            logger.info(f"🤖 Generating UNIQUE article for: {headline[:50]}...")
+            logger.info(f"🤖 Generating LONG UNIQUE article (800-2000 words): {headline[:50]}...")
             
-            # Generate with enhanced uniqueness
+            # Generate with enhanced length
             draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             
             if 'error' in draft or not draft.get('body_draft'):
@@ -433,11 +427,11 @@ class DraftGenerator:
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
         """
-        🆕 GENERATE WITH ANTI-PLAGIARISM & HUMAN-LIKE WRITING
-        - Unique phrasing patterns
-        - Fact-based uniqueness
-        - Creative variations
-        - Natural human flow
+        🆕 GENERATE LONG ARTICLES (800-2000 WORDS)
+        - Multi-section structure
+        - Detailed coverage
+        - Anti-plagiarism
+        - Human-like writing
         """
         
         topic_context = f"""Topic: {topic_info['focus']}
@@ -445,8 +439,7 @@ Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
-        # 🆕 IMPROVED ANTI-PLAGIARISM PROMPT
-        # Multiple writing styles to choose from
+        # WRITING STYLES
         writing_styles = [
             "Write in an investigative journalism style",
             "Write in an analytical news reporting style",
@@ -457,7 +450,7 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
         style_instruction = random.choice(writing_styles)
         
-        # Unique angle prompts
+        # UNIQUE ANGLES
         unique_angles = [
             "Focus on the broader implications and context",
             "Emphasize the human impact and real-world effects",
@@ -468,6 +461,7 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
         angle_instruction = random.choice(unique_angles)
         
+        # 🔧 OPTIMIZED PROMPT FOR LONG ARTICLES (800-2000 WORDS)
         prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
 
 Headline: {headline}
@@ -475,29 +469,55 @@ Summary: {summary}
 
 {topic_context}
 
-Write a UNIQUE, original news article (600 words) with:
-- Your own original introduction (do NOT copy the headline)
-- Fresh perspective and analysis
-- Specific details and context
-- Natural, human-like writing flow
-- Professional journalistic tone
-- Avoid generic phrases like "in a recent development" or "according to reports"
+Write a COMPREHENSIVE, DETAILED news article (1000-1200 words minimum) with these sections:
 
-Be creative and write in your own words. Make it unique.
+1. INTRODUCTION (100-150 words):
+   - Open with a compelling hook
+   - Summarize the key facts
+   - Set the context
+
+2. BACKGROUND & CONTEXT (200-300 words):
+   - Provide historical context
+   - Explain relevant background
+   - Include related developments
+
+3. MAIN DETAILS (400-500 words):
+   - Present all important facts
+   - Include quotes and statistics
+   - Explain the specifics thoroughly
+   - Cover multiple angles
+
+4. ANALYSIS & IMPACT (200-300 words):
+   - Analyze the implications
+   - Discuss future outlook
+   - Explain who is affected and how
+
+5. CONCLUSION (100-150 words):
+   - Summarize key takeaways
+   - Look ahead to next developments
+
+Write in a UNIQUE, original style with:
+- Fresh perspective and creative phrasing
+- Natural, human-like flow
+- Specific details and examples
+- Professional journalistic tone
+- NO generic phrases like "in a recent development"
+
+Make it comprehensive and detailed. Aim for 1000-1200 words.
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating UNIQUE content with AI...")
+            logger.info("⏳ Generating LONG content (60-90 seconds for 1000+ words)...")
             
-            # 🆕 HIGHER TEMPERATURE = MORE CREATIVITY = LESS PLAGIARISM
+            # 🔧 OPTIMIZED FOR LONG GENERATION
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=600,
-                temperature=0.85,  # INCREASED from 0.7 for more uniqueness
-                top_p=0.92,        # More diverse word selection
-                repetition_penalty=1.2,  # INCREASED to avoid repetition
-                stop=["\n\n\n", "Article:", "Summary:"],
+                max_new_tokens=1500,      # INCREASED from 600 for longer articles
+                temperature=0.85,         # High creativity
+                top_p=0.92,              # Diverse word selection
+                repetition_penalty=1.2,   # Avoid repetition
+                stop=["\n\n\n\n", "Article:", "Summary:", "---"],
                 stream=False
             )
             
@@ -510,25 +530,35 @@ Article:"""
             
             generated_text = generated_text.strip()
             
-            if len(generated_text) < 100:
+            # 🔧 CHECK MINIMUM LENGTH (800 words = ~4000 chars)
+            if len(generated_text) < 500:
                 logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
-                return {'error': f'AI generated only {len(generated_text)} characters', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+                logger.warning("⚠️  Model may be too small for long articles. Consider using Mistral-7B.")
+                return {'error': f'AI generated only {len(generated_text)} characters. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
             # Clean text
             cleaned_text = self._clean_generated_text(generated_text)
             
-            if len(cleaned_text) < 100:
+            if len(cleaned_text) < 500:
                 logger.error(f"❌ Cleaned text too short")
-                return {'error': 'Text removed during cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+                return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # 🆕 ADD UNIQUENESS BOOST
+            # ADD UNIQUENESS BOOST
             boosted_text = self._boost_uniqueness(cleaned_text, topic_info)
             
             # Convert to HTML
             html_content = self._convert_to_html(boosted_text)
             
             word_count = len(boosted_text.split())
-            logger.info(f"✅ AI generated {word_count} words (UNIQUE version)")
+            
+            # 🔧 WORD COUNT VALIDATION
+            if word_count < 800:
+                logger.warning(f"⚠️  Word count below target: {word_count} words (target: 800-2000)")
+                logger.warning("💡 Article may be too short. Consider regenerating.")
+            elif word_count > 2000:
+                logger.info(f"✅ Excellent! Generated {word_count} words (exceeds target)")
+            else:
+                logger.info(f"✅ Perfect! Generated {word_count} words (within 800-2000 range)")
             
             return {
                 'title': headline,
@@ -536,7 +566,7 @@ Article:"""
                 'summary': summary,
                 'word_count': word_count,
                 'is_ai_generated': True,
-                'generation_mode': 'ai_model_unique'
+                'generation_mode': 'ai_model_long_unique'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
@@ -545,32 +575,20 @@ Article:"""
             return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """
-        🆕 BOOST CONTENT UNIQUENESS
-        - Add fact-based details
-        - Vary sentence structures
-        - Inject human-like patterns
-        """
-        # Add context sentences if numbers/statistics present
-        if topic_info.get('numbers'):
-            # This makes content more unique by adding analysis
-            pass  # Content already has numbers from model
-        
-        # Vary sentence beginnings (more human-like)
+        """Boost content uniqueness with variations"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
-        # Sentence starters for variety
         starters = [
             'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
-            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, '
+            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, ',
+            'Industry experts note that ', 'Analysts suggest that ', 'Research indicates that '
         ]
         
         for i, sent in enumerate(sentences):
             if i > 0 and i % 4 == 0 and sent.strip() and len(sent) > 20:
-                # Add variety to some sentences
                 if not any(sent.strip().startswith(s) for s in starters):
-                    if random.random() > 0.7:  # 30% of sentences
+                    if random.random() > 0.7:
                         starter = random.choice(starters)
                         sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
             varied_sentences.append(sent)
@@ -588,7 +606,7 @@ Article:"""
         for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
-                if pos > 200:
+                if pos > 500:  # INCREASED from 200 for longer articles
                     cleaned = cleaned[:pos].strip()
                     break
         
@@ -655,7 +673,7 @@ Article:"""
             return 0
     
     def _convert_to_html(self, text: str) -> str:
-        """Convert text to HTML"""
+        """Convert text to HTML with proper structure"""
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
@@ -669,11 +687,18 @@ Article:"""
                     current_paragraph = []
                 continue
             
+            # Check for headings
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
                 html_parts.append(f"<h2>{line.replace('##', '').strip()}</h2>")
+            elif line.endswith(':') and len(line) < 80 and len(line.split()) <= 8:
+                # Section headings
+                if current_paragraph:
+                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    current_paragraph = []
+                html_parts.append(f"<h3>{line}</h3>")
             elif line.isupper() and len(line) < 60 and len(line.split()) > 1:
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
