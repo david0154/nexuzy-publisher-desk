@@ -1,18 +1,18 @@
 """ 
-RSS Manager - ENHANCED IMAGE EXTRACTION FOR MINT & SIMILAR FEEDS
+RSS Manager - ENHANCED IMAGE EXTRACTION (Perplexity disabled temporarily)
 Fetches news from RSS feeds with comprehensive image extraction:
 - Level 1: 11+ RSS image extraction methods (ENHANCED!)
 - Level 2: Free stock photos (Unsplash/Pixabay)
-- Level 3: PERPLEXITY AI WEB SEARCH
+- Level 3: PERPLEXITY AI (temporarily disabled - HTTP 400 errors)
 - Level 4: Placeholder
 
 FEATURES:
 ✅ URL-based duplicate detection
 ✅ Headline similarity checking  
 ✅ 48-hour automatic cleanup
-✅ AI-powered image discovery
 ✅ Debug logging for troubleshooting
 ✅ Better extraction from Mint, WordPress feeds
+✅ Smart image quality selection
 """
 
 import sqlite3
@@ -44,7 +44,7 @@ class RSSManager:
         self.cleanup_hours = 48
         self.max_entries_per_feed = 20
         self.enable_web_search = True
-        self.enable_perplexity_search = True
+        self.enable_perplexity_search = False  # Temporarily disabled (HTTP 400 errors)
         self.perplexity_api_key = self._load_perplexity_api_key()
         self.debug_mode = False
     
@@ -52,7 +52,7 @@ class RSSManager:
         """Load Perplexity API key"""
         api_key = os.getenv('PERPLEXITY_API_KEY')
         if api_key:
-            logger.info("✅ Loaded Perplexity API key from environment")
+            logger.debug("✅ Loaded Perplexity API key from environment (currently disabled)")
             return api_key
         
         try:
@@ -62,7 +62,7 @@ class RSSManager:
                     config = json.load(f)
                     api_key = config.get('perplexity_api_key')
                     if api_key:
-                        logger.info("✅ Loaded Perplexity API key from config.json")
+                        logger.debug("✅ Loaded Perplexity API key from config.json (currently disabled)")
                         return api_key
         except Exception as e:
             logger.debug(f"Could not load from config.json: {e}")
@@ -74,12 +74,11 @@ class RSSManager:
                     for line in f:
                         if line.startswith('PERPLEXITY_API_KEY='):
                             api_key = line.split('=', 1)[1].strip()
-                            logger.info("✅ Loaded Perplexity API key from .env")
+                            logger.debug("✅ Loaded Perplexity API key from .env (currently disabled)")
                             return api_key
         except Exception as e:
             logger.debug(f"Could not load from .env: {e}")
         
-        logger.warning("⚠️ Perplexity API key not found")
         return None
     
     def _make_absolute_url(self, base_url, image_url):
@@ -326,91 +325,9 @@ class RSSManager:
         return ' '.join(keywords[:4])
     
     def _search_perplexity_images(self, headline, category=""):
-        """Perplexity AI image search"""
-        try:
-            if not self.perplexity_api_key:
-                return None
-            
-            logger.info(f"🤖 Perplexity AI searching for: '{headline[:60]}...'")
-            
-            search_query = f"Find a high quality, copyright-free image URL (direct link to .jpg, .png, or .webp) for this news headline: {headline}"
-            if category:
-                search_query += f" Category: {category}. "
-            search_query += "Return ONLY the image URL from Unsplash, Pexels, Pixabay, or Wikimedia Commons. No explanations."
-            
-            headers = {
-                "Authorization": f"Bearer {self.perplexity_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "llama-3.1-sonar-small-128k-online",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are an image URL finder. Return ONLY a direct image URL (ending in .jpg, .png, .webp, etc.) from free stock photo sites like Unsplash, Pexels, Pixabay, or Wikimedia Commons. Return nothing else - just the URL."
-                    },
-                    {
-                        "role": "user",
-                        "content": search_query
-                    }
-                ],
-                "max_tokens": 150,
-                "temperature": 0.1,
-                "top_p": 0.9,
-                "stream": False
-            }
-            
-            response = requests.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=15
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if 'choices' in result and len(result['choices']) > 0:
-                    content = result['choices'][0]['message']['content'].strip()
-                    logger.debug(f"Perplexity response: {content[:200]}")
-                    
-                    # Extract URL
-                    url_pattern = r'https?://[^\s<>"\)\]]+?\.(jpg|jpeg|png|gif|webp)(?:\?[^\s<>"\)\]]*)?'
-                    urls = re.findall(url_pattern, content, re.IGNORECASE)
-                    
-                    if urls:
-                        for match in urls:
-                            start_idx = content.find('http')
-                            if start_idx != -1:
-                                end_idx = start_idx
-                                for char in content[start_idx:]:
-                                    if char in [' ', '\n', ')', ']', '"', "'"]:
-                                        break
-                                    end_idx += 1
-                                
-                                full_url = content[start_idx:end_idx]
-                                if self._is_valid_image_url(full_url):
-                                    logger.info(f"✅ Perplexity AI found: {full_url[:80]}")
-                                    return full_url
-                    
-                    simple_urls = re.findall(r'https?://[^\s<>"\)\]]+', content)
-                    for url in simple_urls:
-                        if self._is_valid_image_url(url):
-                            logger.info(f"✅ Perplexity AI found (simple): {url[:80]}")
-                            return url
-                    
-                    logger.warning(f"⚠️ Perplexity returned: {content[:100]}... (no valid image URL)")
-                else:
-                    logger.warning("⚠️ Perplexity returned empty response")
-            else:
-                logger.error(f"❌ Perplexity API error: HTTP {response.status_code}")
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Perplexity search error: {e}")
-            return None
+        """Perplexity AI image search (currently disabled)"""
+        logger.debug("⚠️ Perplexity AI search is currently disabled (HTTP 400 errors)")
+        return None
     
     def _search_free_stock_images(self, query, headline_full=""):
         """Search free stock photo sites"""
@@ -578,14 +495,8 @@ class RSSManager:
                 image_url = web_image
                 method_used = "stock photos"
         
-        # LEVEL 3: PERPLEXITY AI
-        if not image_url and self.enable_perplexity_search and self.perplexity_api_key and headline:
-            logger.info(f"🤖 Trying Perplexity AI as final fallback...")
-            perplexity_image = self._search_perplexity_images(headline, category)
-            
-            if perplexity_image:
-                image_url = perplexity_image
-                method_used = "Perplexity AI"
+        # LEVEL 3: PERPLEXITY AI (disabled)
+        # Perplexity temporarily disabled due to HTTP 400 errors
         
         # Final validation
         if image_url and not self._is_valid_image_url(image_url):
