@@ -13,6 +13,7 @@ FEATURES:
 ✅ Debug logging for troubleshooting
 ✅ Better extraction from Mint, WordPress feeds
 ✅ Smart image quality selection
+✅ FIXED: media:content for machinelearningmastery.com
 """
 
 import sqlite3
@@ -373,6 +374,7 @@ class RSSManager:
     def extract_image_from_entry(self, entry, headline="", category="", feed_url=""):
         """
         🔍 ENHANCED: Extract image with better support for Mint & WordPress feeds
+        ✅ FIXED: media:content for machinelearningmastery.com (checks 'medium' field)
         """
         image_url = None
         method_used = None
@@ -384,10 +386,12 @@ class RSSManager:
             logger.debug(f"DEBUG: Entry keys: {list(entry.keys())}")
             logger.debug(f"{'='*60}\n")
         
-        # Method 1: media:content tags
+        # Method 1: media:content tags (FIXED: check both 'medium' and 'type')
         if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
-                if 'image' in media.get('type', '').lower():
+                # Check both 'medium' (machinelearningmastery) and 'type' (other feeds)
+                media_type = media.get('medium', media.get('type', '')).lower()
+                if 'image' in media_type:
                     image_url = media.get('url')
                     if image_url:
                         image_url = self._make_absolute_url(feed_url, image_url)
