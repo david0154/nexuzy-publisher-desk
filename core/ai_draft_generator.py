@@ -9,7 +9,6 @@ FEATURES:
 ✅ Local image download (WORKING!)
 ✅ Watermark detection
 ✅ Clean output (no "Introduction:", "Main Details:" headers)
-✅ PyInstaller compatible (detects frozen state)
 """
 
 import sqlite3
@@ -65,21 +64,6 @@ class DraftGenerator:
         else:
             logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output)")
     
-    def _get_base_path(self) -> Path:
-        """
-        Get base path - works in both development and PyInstaller
-        """
-        if getattr(sys, 'frozen', False):
-            # Running in PyInstaller bundle
-            base_path = Path(sys._MEIPASS)
-            logger.info(f"📦 PyInstaller mode: base_path = {base_path}")
-        else:
-            # Running in normal Python
-            base_path = Path.cwd()
-            logger.info(f"💻 Development mode: base_path = {base_path}")
-        
-        return base_path
-    
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type"""
         filename_lower = str(model_path).lower()
@@ -97,74 +81,27 @@ class DraftGenerator:
             return 'llama'
     
     def _load_model(self):
-        """
-        Load GGUF model for long articles
-        Works in both development and PyInstaller packaged app
-        
-        PyInstaller structure:
-        dist/Nexuzy Publisher Desk/
-            Nexuzy Publisher Desk.exe
-            _internal/
-                models/
-                    mistral-7b-instruct-v0.2.Q4_K_M.gguf  <-- Model is here!
-        """
+        """Load GGUF model for long articles"""
         try:
             from ctransformers import AutoModelForCausalLM
             
-            # DEBUG: Show system info
-            logger.info(f"🔍 sys.frozen = {getattr(sys, 'frozen', False)}")
-            if getattr(sys, 'frozen', False):
-                logger.info(f"🔍 sys._MEIPASS = {sys._MEIPASS}")
-                logger.info(f"🔍 sys.executable = {sys.executable}")
-            
-            base_path = self._get_base_path()
-            
-            # Search paths (try PyInstaller bundle first, then development)
-            possible_paths = []
-            
-            # If running from executable directory
-            if getattr(sys, 'frozen', False):
-                exe_dir = Path(sys.executable).parent
-                logger.info(f"🔍 exe_dir = {exe_dir}")
-                
-                # Check _internal folder relative to exe
-                possible_paths.extend([
-                    exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
-                    exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
-                    exe_dir / '_internal' / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
-                ])
-            
-            # PyInstaller bundled models (in sys._MEIPASS)
-            possible_paths.extend([
-                base_path / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
-                base_path / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
-                base_path / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
-                
-                # Also check if in _internal/models (alternative PyInstaller structure)
-                base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
-                base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
-                base_path / '_internal' / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
-            ])
-            
-            # Development paths
-            possible_paths.extend([
+            possible_paths = [
                 Path(self.model_name),
                 Path('models') / self.model_file,
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,
-            ])
+                Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
+            ]
             
             model_path = None
-            logger.info("🔍 Searching for GGUF model in the following paths:")
-            for i, path in enumerate(possible_paths, 1):
-                exists = path.exists()
-                logger.info(f"  [{i}] {path} - EXISTS: {exists}")
-                if exists and not model_path:
+            for path in possible_paths:
+                if path.exists():
                     model_path = path
                     logger.info(f"✅ Found model: {model_path}")
+                    break
             
             if not model_path:
                 logger.error("❌ GGUF model not found")
-                logger.error("All searched paths returned False")
                 return None
             
             model_type = self._detect_model_type(model_path)
@@ -188,8 +125,6 @@ class DraftGenerator:
             return None
         except Exception as e:
             logger.error(f"❌ Error loading model: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None
     
     def _load_sentence_model(self):
