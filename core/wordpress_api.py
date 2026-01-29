@@ -2,6 +2,8 @@
 WordPress API Module - COMPLETE VERSION
 Combines robust Gutenberg conversion + NEW SEO features
 Features: Keywords, Categories, Tags, Meta Descriptions, Proper Content Handling
+
+FIXED: Category extraction SQL query to match actual database schema
 """
 
 import requests
@@ -155,32 +157,141 @@ class WordPressAPI:
         return None
     
     def _extract_categories_from_draft(self, draft_id: int) -> List[str]:
-        """Extract category names from news source RSS feed"""
+        """Extract category names from news - FIXED SQL query"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT n.category, r.category as feed_category
-                FROM ai_drafts d
-                JOIN news_queue n ON d.news_id = n.id
-                LEFT JOIN rss_feeds r ON n.feed_id = r.id
-                WHERE d.id = ?
-            ''', (draft_id,))
-            result = cursor.fetchone()
+            
+            # Try multiple approaches to get category
+            categories = []
+            
+            # Approach 1: Get category directly from news_queue (if column exists)
+            try:
+                cursor.execute('''
+                    SELECT n.category
+                    FROM ai_drafts d
+                    JOIN news_queue n ON d.news_id = n.id
+                    WHERE d.id = ?
+                ''', (draft_id,))
+                result = cursor.fetchone()
+                if result and result[0]:
+                    categories.append(result[0])
+                    logger.info(f"✅ Found category from news_queue: {result[0]}")
+            except sqlite3.OperationalError as e:
+                logger.debug(f"news_queue.category not available: {e}")
+            
+            # Approach 2: Try to get from source_name or source field
+            if not categories:
+                try:
+                    cursor.execute('''
+                        SELECT n.source_name
+                        FROM ai_drafts d
+                        JOIN news_queue n ON d.news_id = n.id
+                        WHERE d.id = ?
+                    ''', (draft_id,))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        # Use source name as category
+                        source = result[0]
+                        # Clean up source name (e.g., "TechCrunch" -> "Technology")
+                        category = self._infer_category_from_source(source)
+                        if category:
+                            categories.append(category)
+                            logger.info(f"✅ Inferred category from source: {source} -> {category}")
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"news_queue.source_name not available: {e}")
+            
+            # Approach 3: Extract from title/content keywords
+            if not categories:
+                try:
+                    cursor.execute('''
+                        SELECT d.title, d.body_draft
+                        FROM ai_drafts d
+                        WHERE d.id = ?
+                    ''', (draft_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        title, body = result
+                        category = self._infer_category_from_content(title, body)
+                        if category:
+                            categories.append(category)
+                            logger.info(f"✅ Inferred category from content: {category}")
+                except Exception as e:
+                    logger.debug(f"Content-based category inference failed: {e}")
+            
             conn.close()
             
-            if result:
-                categories = []
-                if result[0]: categories.append(result[0])
-                if result[1]: categories.append(result[1])
-                return [cat.strip() for cat in categories if cat and cat.strip()]
-            return []
+            if not categories:
+                logger.warning("⚠️ No category found, using default: 'News'")
+                categories = ['News']  # Default fallback category
+            
+            return [cat.strip() for cat in categories if cat and cat.strip()]
+            
         except Exception as e:
             logger.error(f"Error extracting categories: {e}")
-            return []
+            return ['News']  # Fallback to default category
+    
+    def _infer_category_from_source(self, source: str) -> Optional[str]:
+        """Infer category from news source name"""
+        source_lower = source.lower()
+        
+        # Technology sources
+        if any(tech in source_lower for tech in ['tech', 'wired', 'verge', 'engadget', 'cnet', 'ars']):
+            return 'Technology'
+        
+        # Business sources
+        if any(biz in source_lower for biz in ['business', 'forbes', 'fortune', 'bloomberg', 'wsj']):
+            return 'Business'
+        
+        # Entertainment sources
+        if any(ent in source_lower for ent in ['entertainment', 'variety', 'hollywood', 'tmz']):
+            return 'Entertainment'
+        
+        # Sports sources
+        if any(sport in source_lower for sport in ['sport', 'espn', 'athletic']):
+            return 'Sports'
+        
+        # Science sources
+        if any(sci in source_lower for sci in ['science', 'nature', 'scientific']):
+            return 'Science'
+        
+        # Health sources
+        if any(health in source_lower for health in ['health', 'medical', 'medscape']):
+            return 'Health'
+        
+        return None
+    
+    def _infer_category_from_content(self, title: str, body: str) -> Optional[str]:
+        """Infer category from content keywords"""
+        content = (title + ' ' + body).lower()
+        
+        # Count category-related keywords
+        category_scores = {
+            'Technology': ['technology', 'software', 'app', 'digital', 'ai', 'robot', 'computer', 'internet', 'cyber'],
+            'Business': ['business', 'company', 'market', 'economy', 'finance', 'stock', 'investor', 'profit'],
+            'Entertainment': ['movie', 'film', 'music', 'celebrity', 'actor', 'show', 'entertainment', 'album'],
+            'Sports': ['sports', 'game', 'team', 'player', 'champion', 'league', 'tournament', 'match'],
+            'Science': ['science', 'research', 'study', 'discovery', 'experiment', 'scientist', 'laboratory'],
+            'Health': ['health', 'medical', 'disease', 'treatment', 'patient', 'doctor', 'hospital', 'medicine'],
+            'Politics': ['politics', 'government', 'election', 'president', 'congress', 'senate', 'policy'],
+        }
+        
+        scores = {}
+        for category, keywords in category_scores.items():
+            score = sum(1 for keyword in keywords if keyword in content)
+            if score > 0:
+                scores[category] = score
+        
+        if scores:
+            # Return category with highest score
+            best_category = max(scores, key=scores.get)
+            logger.debug(f"Category scores: {scores} -> {best_category}")
+            return best_category
+        
+        return None
     
     def _extract_keywords(self, text: str, max_keywords: int = 10) -> List[str]:
-        """Extract keywords from text for SEO tags - NEW FEATURE"""
+        """Extract keywords from text for SEO tags"""
         if not text:
             return []
         
@@ -207,7 +318,7 @@ class WordPressAPI:
         return keywords
     
     def _generate_seo_excerpt(self, content: str, max_length: int = 160) -> str:
-        """Generate SEO-optimized excerpt/meta description - NEW FEATURE"""
+        """Generate SEO-optimized excerpt/meta description"""
         if not content:
             return ""
         
@@ -259,10 +370,10 @@ class WordPressAPI:
             logger.info(f"   Original content: {len(body_content)} chars")
             logger.info(f"   Preview: {body_content[:200]}...")
             
-            # === NEW: Extract keywords for tags ===
+            # Extract keywords for tags
             keywords = self._extract_keywords(body_content, max_keywords=10)
             
-            # === NEW: Generate SEO excerpt ===
+            # Generate SEO excerpt
             seo_excerpt = self._generate_seo_excerpt(summary or body_content, max_length=160)
             
             # Upload image
@@ -274,6 +385,9 @@ class WordPressAPI:
             category_ids = []
             if categories is None:
                 categories = self._extract_categories_from_draft(draft_id)
+            
+            logger.info(f"📋 Detected categories: {categories}")
+            
             if categories:
                 for cat_name in categories:
                     cat_id = self.get_or_create_category(cat_name)
@@ -309,9 +423,9 @@ class WordPressAPI:
             post_data = {
                 'title': title,
                 'content': gutenberg_content,
-                'excerpt': seo_excerpt,  # SEO excerpt
+                'excerpt': seo_excerpt,
                 'status': 'draft',
-                'meta': {  # SEO plugin support
+                'meta': {
                     '_yoast_wpseo_metadesc': seo_excerpt,
                     '_aioseop_description': seo_excerpt,
                 }
