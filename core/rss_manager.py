@@ -1,10 +1,11 @@
 """
-RSS Manager - Enhanced with Duplicate Detection & Auto-Cleanup
-Fetches news from RSS feeds with advanced filtering
+RSS Manager - Enhanced with Image Fallback & Delete Feed
+Fetches news from RSS feeds with advanced features:
 - URL-based duplicate detection
 - Headline similarity checking  
 - 48-hour automatic news cleanup
-- Today's news only option
+- Smart image fallback with placeholder support
+- Delete feed functionality
 """
 
 import sqlite3
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class RSSManager:
-    """Manage RSS feeds and fetch news articles with images"""
+    """Manage RSS feeds and fetch news articles with smart image fallback"""
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
@@ -77,6 +78,32 @@ class RSSManager:
         ''', (workspace_id, headline_prefix))
         
         return cursor.fetchone()[0] > 0
+    
+    def get_placeholder_image(self, workspace_id):
+        """Get default placeholder image URL from settings"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if settings table has placeholder_image column
+            cursor.execute("PRAGMA table_info(ads_settings)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            if 'placeholder_image' in columns:
+                cursor.execute('SELECT placeholder_image FROM ads_settings WHERE workspace_id = ?', (workspace_id,))
+                result = cursor.fetchone()
+                conn.close()
+                
+                if result and result[0]:
+                    return result[0]
+            
+            conn.close()
+            # Default placeholder if not configured
+            return "https://via.placeholder.com/1200x630/3498db/ffffff?text=Nexuzy+Publisher+Desk"
+            
+        except Exception as e:
+            logger.error(f"Error getting placeholder: {e}")
+            return "https://via.placeholder.com/1200x630/3498db/ffffff?text=Nexuzy+Publisher+Desk"
     
     def cleanup_old_news(self, workspace_id, hours=None):
         """Delete news older than specified hours (default 48)"""
@@ -177,7 +204,7 @@ class RSSManager:
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
         """
-        Fetch latest news from all active RSS feeds with images
+        Fetch latest news from all active RSS feeds with smart image fallback
         
         Args:
             workspace_id: Current workspace
@@ -186,6 +213,9 @@ class RSSManager:
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4. Install with: pip install feedparser beautifulsoup4 requests")
+        
+        # Get placeholder image for this workspace
+        placeholder_image = self.get_placeholder_image(workspace_id)
         
         # First, cleanup old news (48-hour auto-delete)
         logger.info("🧹 Running 48-hour cleanup...")
@@ -278,6 +308,11 @@ class RSSManager:
                         # Extract image URL
                         image_url = self.extract_image_from_entry(entry)
                         
+                        # 📷 SMART IMAGE FALLBACK: Use placeholder if no image found
+                        if not image_url:
+                            image_url = placeholder_image
+                            logger.debug(f"Using placeholder image for: {headline[:50]}")
+                        
                         # Insert into news_queue
                         cursor.execute('''
                             INSERT INTO news_queue 
@@ -332,6 +367,36 @@ class RSSManager:
             return False, "Feed already exists"
         except Exception as e:
             conn.close()
+            return False, str(e)
+    
+    def delete_feed(self, feed_id):
+        """Delete an RSS feed by ID"""
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # First, get feed name for logging
+            cursor.execute('SELECT feed_name FROM rss_feeds WHERE id = ?', (feed_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                conn.close()
+                return False, "Feed not found"
+            
+            feed_name = result[0]
+            
+            # Delete the feed
+            cursor.execute('DELETE FROM rss_feeds WHERE id = ?', (feed_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"🗑️ Deleted feed: {feed_name}")
+            return True, f"Feed '{feed_name}' deleted successfully"
+            
+        except Exception as e:
+            logger.error(f"Error deleting feed: {e}")
             return False, str(e)
     
     def get_feeds(self, workspace_id):
