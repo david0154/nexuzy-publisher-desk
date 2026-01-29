@@ -3,7 +3,7 @@
 
 #define MyAppName "Nexuzy Publisher Desk"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "David Studioz"
+#define MyAppPublisher "Nexuzy Lab"
 #define MyAppURL "https://github.com/david0154/nexuzy-publisher-desk"
 #define MyAppExeName "NexuzyPublisher.exe"
 
