@@ -1,7 +1,7 @@
 """ 
-RSS Manager - IMPROVED IMAGE EXTRACTION (11 Methods!)
+RSS Manager - ENHANCED IMAGE EXTRACTION FOR MINT & SIMILAR FEEDS
 Fetches news from RSS feeds with comprehensive image extraction:
-- Level 1: 11 RSS image extraction methods (IMPROVED!)
+- Level 1: 11+ RSS image extraction methods (ENHANCED!)
 - Level 2: Free stock photos (Unsplash/Pixabay)
 - Level 3: PERPLEXITY AI WEB SEARCH
 - Level 4: Placeholder
@@ -12,6 +12,7 @@ FEATURES:
 ✅ 48-hour automatic cleanup
 ✅ AI-powered image discovery
 ✅ Debug logging for troubleshooting
+✅ Better extraction from Mint, WordPress feeds
 """
 
 import sqlite3
@@ -45,7 +46,7 @@ class RSSManager:
         self.enable_web_search = True
         self.enable_perplexity_search = True
         self.perplexity_api_key = self._load_perplexity_api_key()
-        self.debug_mode = False  # Set to True to see detailed RSS entry info
+        self.debug_mode = False
     
     def _load_perplexity_api_key(self):
         """Load Perplexity API key"""
@@ -98,6 +99,78 @@ class RSSManager:
         try:
             return urljoin(base_url, image_url)
         except:
+            return None
+    
+    def _get_image_quality_score(self, img_url):
+        """Calculate quality score for image URL to pick best one"""
+        if not img_url:
+            return 0
+        
+        score = 0
+        url_lower = img_url.lower()
+        
+        # Size indicators (higher is better)
+        if '1200' in url_lower or '1920' in url_lower:
+            score += 100
+        elif '800' in url_lower or '1000' in url_lower:
+            score += 80
+        elif '600' in url_lower:
+            score += 60
+        elif '400' in url_lower:
+            score += 40
+        elif '150' in url_lower or '200' in url_lower:
+            score += 20
+        
+        # Avoid tiny images
+        if any(x in url_lower for x in ['thumb', 'icon', 'logo', 'avatar', 'emoji', '16x16', '32x32', '50x50']):
+            score -= 50
+        
+        # Prefer certain image formats
+        if url_lower.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            score += 10
+        
+        # Avoid social media icons
+        if any(x in url_lower for x in ['facebook', 'twitter', 'linkedin', 'instagram', 'social']):
+            score -= 100
+        
+        return score
+    
+    def _extract_all_images_from_html(self, html_content, base_url=""):
+        """Extract ALL images from HTML and return best one"""
+        if not html_content:
+            return None
+        
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            img_tags = soup.find_all('img')
+            
+            if not img_tags:
+                return None
+            
+            # Score all images
+            image_candidates = []
+            for img in img_tags:
+                img_url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                if img_url:
+                    img_url = self._make_absolute_url(base_url, img_url)
+                    if self._is_valid_image_url(img_url):
+                        score = self._get_image_quality_score(img_url)
+                        image_candidates.append((img_url, score))
+            
+            if not image_candidates:
+                return None
+            
+            # Return highest scoring image
+            image_candidates.sort(key=lambda x: x[1], reverse=True)
+            best_image = image_candidates[0][0]
+            
+            if self.debug_mode and len(image_candidates) > 1:
+                logger.debug(f"📊 Found {len(image_candidates)} images, picked: {best_image[:80]}")
+            
+            return best_image
+            
+        except Exception as e:
+            logger.debug(f"Error extracting images from HTML: {e}")
             return None
     
     def _generate_url_hash(self, url):
@@ -228,11 +301,15 @@ class RSSManager:
         if not url_lower.startswith(('http://', 'https://')):
             return False
         
+        # Avoid icons and tiny images
+        if any(x in url_lower for x in ['icon', 'logo', 'favicon', 'emoji', '16x16', '32x32', '50x50']):
+            return False
+        
         # Check for image file extensions or image-related paths
         image_indicators = [
             '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
             '/image/', '/images/', '/img/', '/media/', '/photo/', '/photos/',
-            'image=', 'img=', 'photo', 'picture', 'thumbnail'
+            'image=', 'img=', 'photo', 'picture', 'thumbnail', '/lm-img/'  # Mint specific
         ]
         
         return any(indicator in url_lower for indicator in image_indicators)
@@ -328,11 +405,6 @@ class RSSManager:
                     logger.warning("⚠️ Perplexity returned empty response")
             else:
                 logger.error(f"❌ Perplexity API error: HTTP {response.status_code}")
-                try:
-                    error_detail = response.json()
-                    logger.error(f"Error details: {error_detail}")
-                except:
-                    logger.error(f"Response text: {response.text[:300]}")
             
             return None
             
@@ -383,20 +455,16 @@ class RSSManager:
     
     def extract_image_from_entry(self, entry, headline="", category="", feed_url=""):
         """
-        🔍 IMPROVED: Extract image with 11 methods + debug logging
+        🔍 ENHANCED: Extract image with better support for Mint & WordPress feeds
         """
         image_url = None
         method_used = None
         
-        # 🐛 DEBUG: Show what's available in this RSS entry
+        # Debug logging
         if self.debug_mode:
             logger.debug(f"\n{'='*60}")
             logger.debug(f"DEBUG: Entry for '{headline[:50]}...'")
             logger.debug(f"DEBUG: Entry keys: {list(entry.keys())}")
-            logger.debug(f"DEBUG: Has media_content: {hasattr(entry, 'media_content')}")
-            logger.debug(f"DEBUG: Has media_thumbnail: {hasattr(entry, 'media_thumbnail')}")
-            logger.debug(f"DEBUG: Has enclosures: {hasattr(entry, 'enclosures')}")
-            logger.debug(f"DEBUG: Has content: {hasattr(entry, 'content')}")
             logger.debug(f"{'='*60}\n")
         
         # Method 1: media:content tags
@@ -431,39 +499,30 @@ class RSSManager:
                         method_used = "enclosure"
                         break
         
-        # Method 4: Summary/description HTML <img>
+        # Method 4: 🆕 ENHANCED - Extract ALL images from description and pick best
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
-                soup = BeautifulSoup(summary, 'html.parser')
-                img_tag = soup.find('img')
-                if img_tag and img_tag.get('src'):
-                    image_url = img_tag.get('src')
-                    image_url = self._make_absolute_url(feed_url, image_url)
-                    if self._is_valid_image_url(image_url):
-                        method_used = "summary <img>"
+                best_img = self._extract_all_images_from_html(summary, feed_url)
+                if best_img:
+                    image_url = best_img
+                    method_used = "description <img> (best)"
         
-        # Method 5: Content HTML <img>
+        # Method 5: 🆕 ENHANCED - Extract ALL images from content and pick best
         if not image_url and hasattr(entry, 'content') and entry.content:
             for content in entry.content:
-                soup = BeautifulSoup(content.get('value', ''), 'html.parser')
-                img_tag = soup.find('img')
-                if img_tag and img_tag.get('src'):
-                    image_url = img_tag.get('src')
-                    image_url = self._make_absolute_url(feed_url, image_url)
-                    if self._is_valid_image_url(image_url):
-                        method_used = "content <img>"
-                        break
+                best_img = self._extract_all_images_from_html(content.get('value', ''), feed_url)
+                if best_img:
+                    image_url = best_img
+                    method_used = "content <img> (best)"
+                    break
         
-        # Method 6: content:encoded (common in WordPress RSS)
+        # Method 6: content:encoded
         if not image_url and hasattr(entry, 'content_encoded'):
-            soup = BeautifulSoup(entry.content_encoded, 'html.parser')
-            img_tag = soup.find('img')
-            if img_tag and img_tag.get('src'):
-                image_url = img_tag.get('src')
-                image_url = self._make_absolute_url(feed_url, image_url)
-                if self._is_valid_image_url(image_url):
-                    method_used = "content:encoded <img>"
+            best_img = self._extract_all_images_from_html(entry.content_encoded, feed_url)
+            if best_img:
+                image_url = best_img
+                method_used = "content:encoded <img>"
         
         # Method 7: Direct 'image' field
         if not image_url and hasattr(entry, 'image'):
@@ -477,46 +536,28 @@ class RSSManager:
                 if self._is_valid_image_url(image_url):
                     method_used = "direct image field"
         
-        # Method 8: OpenGraph images
+        # Method 8: OpenGraph/Twitter images from description
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
                 soup = BeautifulSoup(summary, 'html.parser')
+                
+                # Try og:image
                 og_image = soup.find('meta', property='og:image') or soup.find('meta', attrs={'property': 'og:image'})
                 if og_image and og_image.get('content'):
-                    image_url = og_image.get('content')
-                    image_url = self._make_absolute_url(feed_url, image_url)
+                    image_url = self._make_absolute_url(feed_url, og_image.get('content'))
                     if self._is_valid_image_url(image_url):
                         method_used = "og:image meta"
-        
-        # Method 9: Twitter Card images
-        if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
-            if summary:
-                soup = BeautifulSoup(summary, 'html.parser')
-                twitter_image = soup.find('meta', attrs={'name': 'twitter:image'}) or soup.find('meta', property='twitter:image')
-                if twitter_image and twitter_image.get('content'):
-                    image_url = twitter_image.get('content')
-                    image_url = self._make_absolute_url(feed_url, image_url)
-                    if self._is_valid_image_url(image_url):
-                        method_used = "twitter:image meta"
-        
-        # Method 10: Any <meta> tag with 'image' in name
-        if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
-            if summary:
-                soup = BeautifulSoup(summary, 'html.parser')
-                meta_tags = soup.find_all('meta')
-                for meta in meta_tags:
-                    meta_name = (meta.get('name', '') + meta.get('property', '')).lower()
-                    if 'image' in meta_name and meta.get('content'):
-                        image_url = meta.get('content')
-                        image_url = self._make_absolute_url(feed_url, image_url)
+                
+                # Try twitter:image
+                if not image_url:
+                    twitter_image = soup.find('meta', attrs={'name': 'twitter:image'}) or soup.find('meta', property='twitter:image')
+                    if twitter_image and twitter_image.get('content'):
+                        image_url = self._make_absolute_url(feed_url, twitter_image.get('content'))
                         if self._is_valid_image_url(image_url):
-                            method_used = f"meta tag ({meta.get('name') or meta.get('property')})"
-                            break
+                            method_used = "twitter:image meta"
         
-        # Method 11: Link tags with image rel
+        # Method 9: Link tags with image rel
         if not image_url and hasattr(entry, 'links'):
             for link in entry.links:
                 if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
@@ -557,13 +598,11 @@ class RSSManager:
             logger.info(f"✅ Image via [{method_used}]: {image_url[:80]}")
         else:
             logger.warning(f"⚠️ NO IMAGE: {headline[:60]}")
-            if self.debug_mode:
-                logger.debug("💡 TIP: Set self.debug_mode = True to see available RSS fields")
         
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
-        """Fetch news with improved image extraction"""
+        """Fetch news with enhanced image extraction"""
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4")
@@ -644,7 +683,7 @@ class RSSManager:
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # 11-METHOD IMAGE EXTRACTION
+                        # ENHANCED IMAGE EXTRACTION
                         image_url = self.extract_image_from_entry(entry, headline, category, feed_url)
                         
                         # Track source
