@@ -1,13 +1,13 @@
 """ 
-AI Draft Generation Module - ANTI-PLAGIARISM & LONGER ARTICLES (800-2000 words)
-Generates UNIQUE, comprehensive news articles with improved length
+AI Draft Generation Module - LONG ARTICLES (800-2000 words) + FIXED IMAGE DISPLAY
+Generates UNIQUE, comprehensive articles with proper image handling
 
-NEW FEATURES:
-✅ 800-2000 word articles (better SEO)
-✅ Multi-section structure
-✅ Detailed, comprehensive coverage
-✅ Title uniqueness check
-✅ Human-like writing patterns
+FIXED:
+✅ Images now use original URLs (not local paths)
+✅ Local download only for watermark check
+✅ WordPress gets clean image URLs
+✅ 800-2000 word articles
+✅ Anti-plagiarism features
 """
 
 import sqlite3
@@ -41,7 +41,6 @@ class DraftGenerator:
         self.model_file = Path(model_name).name
         self.translation_keywords = self._load_translation_keywords()
         
-        # USE CACHED MODEL
         if _CACHED_MODEL:
             logger.info("✅ Using cached AI model")
             self.llm = _CACHED_MODEL
@@ -52,7 +51,6 @@ class DraftGenerator:
                 _CACHED_MODEL = self.llm
                 logger.info("💾 Model cached")
         
-        # SENTENCE MODEL
         if _CACHED_SENTENCE_MODEL:
             self.sentence_model = _CACHED_SENTENCE_MODEL
         else:
@@ -63,10 +61,10 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (800-2000 words, Anti-Plagiarism)")
+            logger.info("✅ AI Writer LOADED (800-2000 words, Anti-Plagiarism, Fixed Images)")
     
     def _detect_model_type(self, model_path: Path) -> str:
-        """Auto-detect model type from filename"""
+        """Auto-detect model type"""
         filename_lower = str(model_path).lower()
         
         if 'phi-2' in filename_lower or 'phi2' in filename_lower:
@@ -78,11 +76,11 @@ class DraftGenerator:
         elif 'qwen' in filename_lower:
             return 'qwen'
         else:
-            logger.warning(f"⚠️  Could not detect model type from '{model_path.name}', defaulting to 'llama'")
+            logger.warning(f"⚠️  Could not detect model type, defaulting to 'llama'")
             return 'llama'
     
     def _load_model(self):
-        """Load GGUF quantized model - OPTIMIZED FOR LONGER ARTICLES"""
+        """Load GGUF model for long articles"""
         try:
             from ctransformers import AutoModelForCausalLM
             
@@ -98,28 +96,27 @@ class DraftGenerator:
             for path in possible_paths:
                 if path.exists():
                     model_path = path
-                    logger.info(f"✅ Found model at: {model_path}")
+                    logger.info(f"✅ Found model: {model_path}")
                     break
             
             if not model_path:
-                logger.error(f"❌ GGUF model not found")
+                logger.error("❌ GGUF model not found")
                 return None
             
             model_type = self._detect_model_type(model_path)
-            logger.info(f"🔍 Detected model type: {model_type}")
-            logger.info(f"⏳ Loading model for LONG articles (800-2000 words)...")
+            logger.info(f"🔍 Model type: {model_type}")
+            logger.info("⏳ Loading for long articles (800-2000 words)...")
             
-            # 🔧 OPTIMIZED FOR LONGER GENERATION
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type=model_type,
-                context_length=2048,     # DOUBLED from 1024 for longer articles
-                max_new_tokens=1500,     # INCREASED from 600 for 800-2000 words
+                context_length=2048,
+                max_new_tokens=1500,
                 threads=4,
                 gpu_layers=0
             )
             
-            logger.info(f"✅ Model loaded: {model_path.name} (supports 800-2000 words)")
+            logger.info(f"✅ Model loaded: {model_path.name}")
             return llm
         
         except ImportError:
@@ -157,7 +154,6 @@ class DraftGenerator:
                 prompt = f"Rewrite this sentence to be more professional and clear: {sentence}"
                 result = self.sentence_model(prompt, max_length=150, do_sample=False)
                 improved = result[0]['generated_text'].strip()
-                logger.info(f"AI improved: {sentence[:40]}... → {improved[:40]}...")
                 return improved
             except Exception as e:
                 logger.error(f"Sentence improvement error: {e}")
@@ -193,10 +189,7 @@ class DraftGenerator:
         }
     
     def _check_title_uniqueness(self, proposed_title: str) -> Dict:
-        """
-        🆕 CHECK IF TITLE ALREADY EXISTS
-        Returns: {'is_unique': bool, 'similar_titles': list, 'suggestion': str}
-        """
+        """Check if title already exists"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -206,8 +199,8 @@ class DraftGenerator:
             conn.close()
             
             proposed_normalized = proposed_title.lower().strip()
-            
             similar_titles = []
+            
             for existing in existing_titles:
                 existing_normalized = existing.lower().strip()
                 
@@ -251,21 +244,12 @@ class DraftGenerator:
             f"{original_title} - Breaking Analysis",
             f"{original_title}: Complete Report",
             f"{original_title} - Comprehensive Guide",
-            f"{original_title}: Everything You Should Know",
         ]
-        
         return random.choice(variations)
     
     def _extract_topic_info(self, headline: str, summary: str, category: str) -> Dict:
-        """Extract comprehensive topic information"""
-        entities = {
-            'people': [],
-            'organizations': [],
-            'places': [],
-            'events': [],
-            'numbers': [],
-            'technical_terms': []
-        }
+        """Extract topic information"""
+        entities = {'people': [], 'organizations': [], 'places': [], 'events': [], 'numbers': [], 'technical_terms': []}
         
         full_text = (headline + ' ' + summary).lower()
         original_text = headline + ' ' + summary
@@ -307,43 +291,55 @@ class DraftGenerator:
         
         return f"{category.lower()} development"
     
-    def download_and_store_image(self, image_url: str, news_id: int) -> Optional[str]:
-        """Download and store image locally"""
+    def _check_watermark(self, image_url: str) -> bool:
+        """
+        🔧 FIXED: Download temporarily, check watermark, delete
+        Returns: True if image is clean, False if watermarked
+        """
         if not image_url:
-            return None
+            return True
         
         try:
-            logger.info(f"Downloading image: {image_url}")
+            # Download temporarily
             response = requests.get(image_url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-            
             if response.status_code != 200:
-                logger.error(f"Failed to download image: HTTP {response.status_code}")
-                return None
+                return True  # Can't check, allow image
             
             from PIL import Image
-            img = Image.open(BytesIO(response.content))
+            import tempfile
             
-            images_dir = Path('downloaded_images')
-            images_dir.mkdir(exist_ok=True)
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                tmp_file.write(response.content)
+                temp_path = tmp_file.name
             
-            ext = image_url.split('.')[-1].split('?')[0]
-            if ext not in ['jpg', 'jpeg', 'png', 'gif', 'webp']:
-                ext = 'jpg'
-            
-            filename = f"news_{news_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-            filepath = images_dir / filename
-            
-            img.save(filepath)
-            logger.info(f"✅ Image downloaded: {filepath}")
-            
-            return str(filepath)
-        
+            try:
+                from core.vision_ai import VisionAI
+                vision = VisionAI(self.db_path)
+                watermark_check = vision._detect_watermark(temp_path)
+                
+                # Delete temp file
+                os.unlink(temp_path)
+                
+                if watermark_check['has_watermark'] and watermark_check['confidence'] > 0.6:
+                    logger.warning(f"⚠️  WATERMARK DETECTED: {watermark_check['type']} (confidence: {watermark_check['confidence']:.2f})")
+                    return False  # Watermarked
+                else:
+                    logger.info(f"✅ Image clean - no watermark (confidence: {watermark_check['confidence']:.2f})")
+                    return True  # Clean
+            except Exception as e:
+                # Delete temp file on error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                logger.warning(f"⚠️  Watermark check failed: {e}")
+                return True  # Allow image if check fails
+                
         except Exception as e:
-            logger.error(f"Error downloading image: {e}")
-            return None
+            logger.warning(f"⚠️  Could not check watermark: {e}")
+            return True  # Allow image if download fails
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
-        """Generate UNIQUE, LONG article draft (800-2000 words)"""
+        """Generate UNIQUE, LONG article (800-2000 words)"""
         try:
             if not self.llm:
                 error_msg = "❌ AI model not loaded"
@@ -369,38 +365,26 @@ class DraftGenerator:
             workspace_id = cursor.fetchone()[0]
             conn.close()
             
-            # Download image
-            local_image_path = None
+            # 🔧 FIXED: Check watermark without storing local file
+            original_image_url = image_url  # Keep original URL
             if image_url:
-                local_image_path = self.download_and_store_image(image_url, news_id)
-                
-                if local_image_path:
-                    try:
-                        from core.vision_ai import VisionAI
-                        vision = VisionAI(self.db_path)
-                        watermark_check = vision._detect_watermark(local_image_path)
-                        
-                        if watermark_check['has_watermark'] and watermark_check['confidence'] > 0.6:
-                            logger.warning(f"⚠️  WATERMARK DETECTED: {watermark_check['type']}")
-                            image_url = None
-                            local_image_path = None
-                        else:
-                            logger.info(f"✅ Image clean - no watermark")
-                    except Exception as e:
-                        logger.warning(f"⚠️  Watermark check failed: {e}")
+                is_clean = self._check_watermark(image_url)
+                if not is_clean:
+                    logger.warning("❌ Rejecting watermarked image")
+                    image_url = None  # Don't use watermarked image
+                    original_image_url = None
             
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
             # CHECK TITLE UNIQUENESS
             title_check = self._check_title_uniqueness(headline)
             if not title_check['is_unique']:
-                logger.warning(f"⚠️  Title already exists! Similar titles: {len(title_check['similar_titles'])}")
-                logger.info(f"💡 Using unique title: {title_check['suggestion']}")
+                logger.warning(f"⚠️  Title exists! Using unique variant")
+                logger.info(f"💡 New title: {title_check['suggestion']}")
                 headline = title_check['suggestion']
             
             logger.info(f"🤖 Generating LONG UNIQUE article (800-2000 words): {headline[:50]}...")
             
-            # Generate with enhanced length
             draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
             
             if 'error' in draft or not draft.get('body_draft'):
@@ -408,15 +392,15 @@ class DraftGenerator:
                 logger.error(f"❌ Generation failed: {error_msg}")
                 return {'error': error_msg, 'title': headline, 'body_draft': '', 'word_count': 0}
             
-            draft['image_url'] = image_url or ''
-            draft['local_image_path'] = local_image_path or ''
+            # 🔧 FIXED: Store original URL (not local path)
+            draft['image_url'] = original_image_url or ''  # Original URL for WordPress
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
             draft['is_html'] = True
             
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"✅ Generated draft {draft_id} for news_id {news_id}, words: {draft.get('word_count', 0)}")
+            logger.info(f"✅ Generated draft {draft_id}, words: {draft.get('word_count', 0)}")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
@@ -426,20 +410,13 @@ class DraftGenerator:
             return {'error': str(e)}
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """
-        🆕 GENERATE LONG ARTICLES (800-2000 WORDS)
-        - Multi-section structure
-        - Detailed coverage
-        - Anti-plagiarism
-        - Human-like writing
-        """
+        """Generate LONG article with anti-plagiarism"""
         
         topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
-        # WRITING STYLES
         writing_styles = [
             "Write in an investigative journalism style",
             "Write in an analytical news reporting style",
@@ -448,9 +425,6 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
             "Write in an explanatory journalism style"
         ]
         
-        style_instruction = random.choice(writing_styles)
-        
-        # UNIQUE ANGLES
         unique_angles = [
             "Focus on the broader implications and context",
             "Emphasize the human impact and real-world effects",
@@ -459,9 +433,9 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
             "Examine the economic and social dimensions"
         ]
         
+        style_instruction = random.choice(writing_styles)
         angle_instruction = random.choice(unique_angles)
         
-        # 🔧 OPTIMIZED PROMPT FOR LONG ARTICLES (800-2000 WORDS)
         prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
 
 Headline: {headline}
@@ -472,93 +446,80 @@ Summary: {summary}
 Write a COMPREHENSIVE, DETAILED news article (1000-1200 words minimum) with these sections:
 
 1. INTRODUCTION (100-150 words):
-   - Open with a compelling hook
-   - Summarize the key facts
-   - Set the context
+   - Compelling hook
+   - Key facts summary  
+   - Context
 
 2. BACKGROUND & CONTEXT (200-300 words):
-   - Provide historical context
-   - Explain relevant background
-   - Include related developments
+   - Historical context
+   - Relevant background
+   - Related developments
 
 3. MAIN DETAILS (400-500 words):
-   - Present all important facts
-   - Include quotes and statistics
-   - Explain the specifics thoroughly
-   - Cover multiple angles
+   - Important facts
+   - Quotes and statistics
+   - Multiple angles
+   - Thorough explanation
 
 4. ANALYSIS & IMPACT (200-300 words):
-   - Analyze the implications
-   - Discuss future outlook
-   - Explain who is affected and how
+   - Implications
+   - Future outlook
+   - Who is affected
 
 5. CONCLUSION (100-150 words):
-   - Summarize key takeaways
-   - Look ahead to next developments
+   - Key takeaways
+   - Next developments
 
 Write in a UNIQUE, original style with:
 - Fresh perspective and creative phrasing
 - Natural, human-like flow
-- Specific details and examples
-- Professional journalistic tone
-- NO generic phrases like "in a recent development"
+- Specific details
+- Professional tone
+- NO generic phrases
 
-Make it comprehensive and detailed. Aim for 1000-1200 words.
+Aim for 1000-1200 words.
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating LONG content (60-90 seconds for 1000+ words)...")
+            logger.info("⏳ Generating LONG content (60-90 seconds)...")
             
-            # 🔧 OPTIMIZED FOR LONG GENERATION
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=1500,      # INCREASED from 600 for longer articles
-                temperature=0.85,         # High creativity
-                top_p=0.92,              # Diverse word selection
-                repetition_penalty=1.2,   # Avoid repetition
-                stop=["\n\n\n\n", "Article:", "Summary:", "---"],
+                max_new_tokens=1500,
+                temperature=0.85,
+                top_p=0.92,
+                repetition_penalty=1.2,
+                stop=["\n\n\n\n", "Article:", "Summary:"],
                 stream=False
             )
             
-            if not generated_text:
-                logger.error(f"❌ Model returned empty")
-                return {'error': 'AI model returned empty', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
-            
-            if not isinstance(generated_text, str):
-                generated_text = str(generated_text)
+            if not generated_text or not isinstance(generated_text, str):
+                generated_text = str(generated_text) if generated_text else ""
             
             generated_text = generated_text.strip()
             
-            # 🔧 CHECK MINIMUM LENGTH (800 words = ~4000 chars)
             if len(generated_text) < 500:
                 logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
-                logger.warning("⚠️  Model may be too small for long articles. Consider using Mistral-7B.")
-                return {'error': f'AI generated only {len(generated_text)} characters. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+                return {'error': f'AI generated only {len(generated_text)} chars. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # Clean text
             cleaned_text = self._clean_generated_text(generated_text)
             
             if len(cleaned_text) < 500:
-                logger.error(f"❌ Cleaned text too short")
+                logger.error("❌ Cleaned text too short")
                 return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # ADD UNIQUENESS BOOST
             boosted_text = self._boost_uniqueness(cleaned_text, topic_info)
-            
-            # Convert to HTML
             html_content = self._convert_to_html(boosted_text)
             
             word_count = len(boosted_text.split())
             
-            # 🔧 WORD COUNT VALIDATION
             if word_count < 800:
-                logger.warning(f"⚠️  Word count below target: {word_count} words (target: 800-2000)")
-                logger.warning("💡 Article may be too short. Consider regenerating.")
+                logger.warning(f"⚠️  Word count low: {word_count} (target: 800-2000)")
             elif word_count > 2000:
-                logger.info(f"✅ Excellent! Generated {word_count} words (exceeds target)")
+                logger.info(f"✅ Excellent! {word_count} words (exceeds target)")
             else:
-                logger.info(f"✅ Perfect! Generated {word_count} words (within 800-2000 range)")
+                logger.info(f"✅ Perfect! {word_count} words (within range)")
             
             return {
                 'title': headline,
@@ -575,14 +536,14 @@ Article:"""
             return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """Boost content uniqueness with variations"""
+        """Boost content uniqueness"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
         starters = [
             'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
             'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, ',
-            'Industry experts note that ', 'Analysts suggest that ', 'Research indicates that '
+            'Industry experts note that ', 'Analysts suggest that '
         ]
         
         for i, sent in enumerate(sentences):
@@ -606,7 +567,7 @@ Article:"""
         for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
-                if pos > 500:  # INCREASED from 200 for longer articles
+                if pos > 500:
                     cleaned = cleaned[:pos].strip()
                     break
         
@@ -626,22 +587,25 @@ Article:"""
             return False
     
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
-        """Store draft in database"""
+        """
+        🔧 FIXED: Store draft WITHOUT local image path in HTML
+        Image URL is stored separately for WordPress to handle
+        """
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # 🔧 CRITICAL: Don't add local image path to HTML body!
+            # WordPress will handle the featured_media from image_url field
             html_body = draft.get('body_draft', '')
             
-            if draft.get('local_image_path'):
-                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
-                html_body = image_html + html_body
-            
+            # Image URL stored separately - WordPress uploads from this URL
             columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
             values = [
                 workspace_id, news_id, draft.get('title', ''), html_body,
                 draft.get('summary', ''), draft.get('word_count', 0),
-                draft.get('image_url', ''), draft.get('source_url', ''),
+                draft.get('image_url', ''),  # Original URL - WordPress downloads from this
+                draft.get('source_url', ''),
                 datetime.now().isoformat()
             ]
             
@@ -666,6 +630,8 @@ Article:"""
             draft_id = cursor.lastrowid
             conn.close()
             
+            logger.info(f"✅ Stored draft {draft_id} with image URL: {draft.get('image_url', 'None')[:50]}...")
+            
             return draft_id
         
         except Exception as e:
@@ -673,7 +639,7 @@ Article:"""
             return 0
     
     def _convert_to_html(self, text: str) -> str:
-        """Convert text to HTML with proper structure"""
+        """Convert text to HTML"""
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
@@ -687,14 +653,12 @@ Article:"""
                     current_paragraph = []
                 continue
             
-            # Check for headings
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
                 html_parts.append(f"<h2>{line.replace('##', '').strip()}</h2>")
             elif line.endswith(':') and len(line) < 80 and len(line.split()) <= 8:
-                # Section headings
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
