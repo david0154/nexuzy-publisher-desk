@@ -1,11 +1,16 @@
 """ 
-RSS Manager - WITH AUTO WEB SEARCH FOR MISSING IMAGES (FULL TITLE)
-Fetches news from RSS feeds with intelligent image fallback:
-- 8 RSS image extraction methods
-- 🆕 Auto web search using FULL TITLE for better matching
-- URL-based duplicate detection
-- Headline similarity checking  
-- 48-hour automatic cleanup
+RSS Manager - ULTIMATE IMAGE SEARCH WITH PERPLEXITY AI
+Fetches news from RSS feeds with 4-level intelligent image fallback:
+- Level 1: 8 RSS image extraction methods
+- Level 2: Free stock photos (Unsplash/Pixabay)
+- Level 3: 🆕 PERPLEXITY AI WEB SEARCH (ultimate fallback!)
+- Level 4: Placeholder (rarely needed now)
+
+FEATURES:
+✅ URL-based duplicate detection
+✅ Headline similarity checking  
+✅ 48-hour automatic cleanup
+✅ AI-powered image discovery
 """
 
 import sqlite3
@@ -15,6 +20,8 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse, quote
 import re
 import json
+import os
+from pathlib import Path
 
 try:
     import feedparser
@@ -28,13 +35,58 @@ logger = logging.getLogger(__name__)
 
 
 class RSSManager:
-    """Manage RSS feeds with auto web search using full titles"""
+    """Manage RSS feeds with 4-level image search including Perplexity AI"""
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
         self.cleanup_hours = 48
         self.max_entries_per_feed = 20
-        self.enable_web_search = True  # Enable auto web search for images
+        self.enable_web_search = True
+        self.enable_perplexity_search = True  # 🆕 Enable Perplexity AI search
+        self.perplexity_api_key = self._load_perplexity_api_key()
+    
+    def _load_perplexity_api_key(self):
+        """
+        Load Perplexity API key from:
+        1. Environment variable (PERPLEXITY_API_KEY)
+        2. config.json file
+        3. .env file
+        """
+        # Try environment variable first
+        api_key = os.getenv('PERPLEXITY_API_KEY')
+        if api_key:
+            logger.info("✅ Loaded Perplexity API key from environment")
+            return api_key
+        
+        # Try config.json
+        try:
+            config_path = Path('config.json')
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    api_key = config.get('perplexity_api_key')
+                    if api_key:
+                        logger.info("✅ Loaded Perplexity API key from config.json")
+                        return api_key
+        except Exception as e:
+            logger.debug(f"Could not load from config.json: {e}")
+        
+        # Try .env file
+        try:
+            env_path = Path('.env')
+            if env_path.exists():
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        if line.startswith('PERPLEXITY_API_KEY='):
+                            api_key = line.split('=', 1)[1].strip()
+                            logger.info("✅ Loaded Perplexity API key from .env")
+                            return api_key
+        except Exception as e:
+            logger.debug(f"Could not load from .env: {e}")
+        
+        logger.warning("⚠️ Perplexity API key not found. Add to config.json or environment variable.")
+        logger.info("💡 To enable Perplexity image search, add 'perplexity_api_key' to config.json")
+        return None
     
     def _generate_url_hash(self, url):
         """Generate unique hash for URL deduplication"""
@@ -174,33 +226,117 @@ class RSSManager:
     
     def _extract_search_keywords(self, headline):
         """
-        🆕 Extract clean keywords from headline (fallback option)
+        Extract clean keywords from headline (fallback option)
         """
-        # Remove common filler words
         stop_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
                       'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
                       'says', 'announces', 'launches', 'reports', 'reveals']
         
-        # Clean headline
         words = re.findall(r'\b[a-zA-Z]{3,}\b', headline.lower())
         keywords = [w for w in words if w not in stop_words]
         
-        # Take top 4 most important words
         return ' '.join(keywords[:4])
+    
+    def _search_perplexity_images(self, headline, category=""):
+        """
+        🆕 PERPLEXITY AI IMAGE SEARCH - Ultimate fallback!
+        Uses Perplexity API to find relevant images across the web
+        """
+        try:
+            if not self.perplexity_api_key:
+                return None
+            
+            logger.info(f"🤖 Perplexity AI searching for: '{headline[:60]}...'")
+            
+            search_query = f"Find high quality image URL for: {headline}"
+            if category:
+                search_query += f" (category: {category})"
+            
+            headers = {
+                "Authorization": f"Bearer {self.perplexity_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "llama-3.1-sonar-small-128k-online",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an image search assistant. When given a headline, find and return ONLY a single high-quality image URL (direct link to .jpg, .png, .webp, etc.) that best represents the topic. Return ONLY the URL, nothing else. The image must be from a reliable source like Unsplash, Pexels, Wikimedia Commons, or news websites. Do not return placeholder images or broken links."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Find a high-quality image URL for this headline: {headline}"
+                    }
+                ],
+                "max_tokens": 200,
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "search_domain_filter": ["unsplash.com", "pexels.com", "pixabay.com"],
+                "return_images": False,
+                "return_related_questions": False,
+                "search_recency_filter": "month",
+                "top_k": 0,
+                "stream": False,
+                "presence_penalty": 0,
+                "frequency_penalty": 1
+            }
+            
+            response = requests.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                if 'choices' in result and len(result['choices']) > 0:
+                    content = result['choices'][0]['message']['content'].strip()
+                    
+                    # Extract URL from response
+                    url_pattern = r'https?://[^\s<>"]+?\.(jpg|jpeg|png|gif|webp)(?:\?[^\s<>"]*)?'
+                    urls = re.findall(url_pattern, content, re.IGNORECASE)
+                    
+                    if urls:
+                        for url_match in urls:
+                            full_url = content[content.find('http'):content.find(url_match[0]) + len(url_match[0])]
+                            if self._is_valid_image_url(full_url):
+                                logger.info(f"✅ Perplexity AI found: {full_url[:80]}")
+                                return full_url
+                    
+                    # If no direct URL found, try to extract any URL from response
+                    simple_url = re.findall(r'https?://[^\s<>"]+', content)
+                    if simple_url:
+                        for url in simple_url:
+                            if self._is_valid_image_url(url):
+                                logger.info(f"✅ Perplexity AI found (alternative): {url[:80]}")
+                                return url
+                    
+                    logger.warning(f"⚠️ Perplexity returned text but no valid image URL: {content[:100]}")
+                else:
+                    logger.warning("⚠️ Perplexity returned empty response")
+            else:
+                logger.error(f"❌ Perplexity API error: HTTP {response.status_code}")
+                logger.debug(f"Response: {response.text[:200]}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Perplexity search error: {e}")
+            return None
     
     def _search_free_stock_images(self, query, headline_full=""):
         """
-        🆕 Search free stock photo sites using FULL TITLE first, then keywords
-        Returns: image_url or None
+        Search free stock photo sites using FULL TITLE first, then keywords
         """
         try:
-            # Try with full headline first (better context)
             search_query = headline_full[:80] if headline_full else query
             logger.info(f"🔍 Web searching images for: '{search_query}'")
             
-            # Method 1: Unsplash (supports full titles)
+            # Try Unsplash with full title
             try:
-                # Clean title for URL
                 clean_query = re.sub(r'[^a-zA-Z0-9\s]', '', search_query)
                 unsplash_url = f"https://source.unsplash.com/1200x630/?{quote(clean_query)}"
                 response = requests.head(unsplash_url, timeout=5, allow_redirects=True)
@@ -212,7 +348,7 @@ class RSSManager:
             except Exception as e:
                 logger.debug(f"Unsplash title search failed: {e}")
             
-            # Fallback: Try with keywords if full title didn't work
+            # Fallback: Try with keywords
             if headline_full:
                 try:
                     keywords = self._extract_search_keywords(headline_full)
@@ -227,7 +363,7 @@ class RSSManager:
                 except Exception as e:
                     logger.debug(f"Unsplash keyword search failed: {e}")
             
-            # Method 2: Pixabay
+            # Try Pixabay
             try:
                 pixabay_search = f"https://pixabay.com/en/photos/search/{quote(search_query)}/"
                 headers = {'User-Agent': 'Mozilla/5.0'}
@@ -255,12 +391,17 @@ class RSSManager:
     
     def extract_image_from_entry(self, entry, headline="", category=""):
         """
-        Extract image URL from RSS entry with 8 methods + web search using full title
+        Extract image URL with 4-level search:
+        1. RSS feed (8 methods)
+        2. Free stock photos
+        3. 🆕 PERPLEXITY AI
+        4. None (will use placeholder later)
         """
         image_url = None
         method_used = None
         
-        # Method 1: media:content tags
+        # LEVEL 1: RSS extraction (8 methods)
+        # Method 1: media:content
         if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
                 if 'image' in media.get('type', '').lower():
@@ -269,7 +410,7 @@ class RSSManager:
                         method_used = "media:content"
                         break
         
-        # Method 2: media:thumbnail tags
+        # Method 2: media:thumbnail
         if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
             if isinstance(entry.media_thumbnail, list) and len(entry.media_thumbnail) > 0:
                 image_url = entry.media_thumbnail[0].get('url')
@@ -286,7 +427,7 @@ class RSSManager:
                     method_used = "enclosure"
                     break
         
-        # Method 4: Summary/description HTML <img>
+        # Method 4-8: Other RSS methods (summary img, content img, og:image, twitter:image, link rel)
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -297,7 +438,6 @@ class RSSManager:
                     if self._is_valid_image_url(image_url):
                         method_used = "summary <img>"
         
-        # Method 5: Content HTML <img>
         if not image_url and hasattr(entry, 'content') and entry.content:
             for content in entry.content:
                 soup = BeautifulSoup(content.get('value', ''), 'html.parser')
@@ -308,78 +448,47 @@ class RSSManager:
                         method_used = "content <img>"
                         break
         
-        # Method 6: OpenGraph images
-        if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
-            if summary:
-                soup = BeautifulSoup(summary, 'html.parser')
-                og_image = soup.find('meta', property='og:image')
-                if og_image and og_image.get('content'):
-                    image_url = og_image.get('content')
-                    if self._is_valid_image_url(image_url):
-                        method_used = "og:image meta"
-        
-        # Method 7: Twitter Card images
-        if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
-            if summary:
-                soup = BeautifulSoup(summary, 'html.parser')
-                twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
-                if twitter_image and twitter_image.get('content'):
-                    image_url = twitter_image.get('content')
-                    if self._is_valid_image_url(image_url):
-                        method_used = "twitter:image meta"
-        
-        # Method 8: Link tags with image rel
-        if not image_url and hasattr(entry, 'links'):
-            for link in entry.links:
-                if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
-                    link_url = link.get('href')
-                    if self._is_valid_image_url(link_url):
-                        image_url = link_url
-                        method_used = "link rel=image"
-                        break
-        
-        # 🆕 Method 9: WEB SEARCH USING FULL TITLE
+        # LEVEL 2: Free stock photos
         if not image_url and self.enable_web_search and headline:
-            logger.info(f"🌐 No RSS image - trying web search with full title: {headline[:60]}")
-            
-            # Search with full title for better context
+            logger.info(f"🌐 No RSS image - trying web search: {headline[:60]}")
             web_image = self._search_free_stock_images(headline, headline_full=headline)
             
             if web_image:
                 image_url = web_image
-                method_used = "web search (full title)"
+                method_used = "stock photos"
         
-        # Final validation
+        # LEVEL 3: 🆕 PERPLEXITY AI
+        if not image_url and self.enable_perplexity_search and self.perplexity_api_key and headline:
+            logger.info(f"🤖 Trying Perplexity AI as final fallback...")
+            perplexity_image = self._search_perplexity_images(headline, category)
+            
+            if perplexity_image:
+                image_url = perplexity_image
+                method_used = "Perplexity AI"
+        
+        # Validation
         if image_url and not self._is_valid_image_url(image_url):
-            logger.debug(f"❌ Invalid image URL rejected: {image_url[:80]}")
+            logger.debug(f"❌ Invalid image URL: {image_url[:80]}")
             image_url = None
             method_used = None
         
         # Logging
         if image_url:
-            logger.info(f"✅ Image found via [{method_used}]: {image_url[:80]}... for '{headline[:40]}...'")
+            logger.info(f"✅ Image via [{method_used}]: {image_url[:80]}")
         else:
-            logger.warning(f"⚠️ NO IMAGE found for: {headline[:60]}... (tried 9 methods including web search)")
+            logger.warning(f"⚠️ NO IMAGE: {headline[:60]}")
         
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
-        """
-        Fetch latest news from all active RSS feeds with auto web search using full titles
-        
-        Args:
-            workspace_id: Current workspace
-            today_only: If True, only fetch today's news
-        """
+        """Fetch news with 4-level image search"""
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4")
         
         placeholder_image = self.get_placeholder_image(workspace_id)
         
-        logger.info("🧹 Running 48-hour cleanup...")
+        logger.info("🧹 Running cleanup...")
         deleted_count = self.cleanup_old_news(workspace_id)
         
         conn = sqlite3.connect(self.db_path)
@@ -395,21 +504,20 @@ class RSSManager:
         
         if not feeds:
             conn.close()
-            return 0, "No RSS feeds configured. Add some feeds first!"
+            return 0, "No RSS feeds configured."
         
         total_fetched = 0
         total_skipped = 0
-        images_from_rss = 0
-        images_from_web = 0
-        images_placeholder = 0
+        img_rss = 0
+        img_stock = 0
+        img_ai = 0
+        img_placeholder = 0
         
         for feed_id, feed_name, feed_url, category in feeds:
             try:
-                logger.info(f"📰 Fetching from: {feed_name} ({feed_url})")
+                logger.info(f"📰 Fetching: {feed_name}")
                 
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
+                headers = {'User-Agent': 'Mozilla/5.0'}
                 
                 try:
                     response = requests.get(feed_url, headers=headers, timeout=10)
@@ -418,14 +526,14 @@ class RSSManager:
                     feed = feedparser.parse(feed_url)
                 
                 if not feed.entries:
-                    logger.warning(f"⚠️ No entries found in feed: {feed_url}")
+                    logger.warning(f"⚠️ No entries in: {feed_url}")
                     continue
                 
-                logger.info(f"✅ Found {len(feed.entries)} entries in {feed_name}")
+                logger.info(f"✅ Found {len(feed.entries)} entries")
                 
                 for entry in feed.entries[:self.max_entries_per_feed]:
                     try:
-                        headline = entry.get('title', 'No title').strip()
+                        headline = entry.get('title', '').strip()
                         summary = entry.get('summary', entry.get('description', ''))
                         
                         if summary:
@@ -454,19 +562,20 @@ class RSSManager:
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # 🔍 EXTRACT IMAGE (8 RSS methods + web search with FULL TITLE)
+                        # 4-LEVEL IMAGE SEARCH
                         image_url = self.extract_image_from_entry(entry, headline, category)
                         
-                        # Track image source
+                        # Track source
                         if image_url:
-                            if 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower():
-                                images_from_web += 1
+                            if 'perplexity' in str(image_url).lower() or 'AI' in str(image_url):
+                                img_ai += 1
+                            elif 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower():
+                                img_stock += 1
                             else:
-                                images_from_rss += 1
+                                img_rss += 1
                         else:
-                            images_placeholder += 1
+                            img_placeholder += 1
                             image_url = placeholder_image
-                            logger.debug(f"📷 Using placeholder for: {headline[:50]}")
                         
                         cursor.execute('''
                             INSERT INTO news_queue 
@@ -482,27 +591,25 @@ class RSSManager:
                         logger.error(f"❌ Error processing entry: {e}")
                         continue
                 
-                logger.info(f"✅ Fetched {total_fetched} new articles from {feed_name}")
-                
             except Exception as e:
-                logger.error(f"❌ Error fetching feed {feed_url}: {e}")
+                logger.error(f"❌ Error fetching feed: {e}")
                 continue
         
         conn.commit()
         conn.close()
         
-        result_msg = f"✅ Successfully fetched {total_fetched} new articles!"
-        result_msg += f"\n📷 Images: {images_from_rss} from RSS, {images_from_web} from web (full title), {images_placeholder} placeholder"
+        result_msg = f"✅ Fetched {total_fetched} articles!\n"
+        result_msg += f"📷 RSS:{img_rss} | Stock:{img_stock} | AI:{img_ai} | Placeholder:{img_placeholder}"
         if deleted_count > 0:
-            result_msg += f"\n🧹 Cleaned up {deleted_count} old news (48h+ old)"
+            result_msg += f"\n🧹 Cleaned: {deleted_count}"
         if total_skipped > 0:
-            result_msg += f"\n⏭️ Skipped {total_skipped} duplicates"
+            result_msg += f"\n⏭️ Skipped: {total_skipped}"
         
-        logger.info(f"🎉 Total: {total_fetched} new | RSS:{images_from_rss} | Web:{images_from_web} | Placeholder:{images_placeholder}")
+        logger.info(result_msg)
         return total_fetched, result_msg
     
     def add_feed(self, workspace_id, feed_name, feed_url, category='General'):
-        """Add a new RSS feed"""
+        """Add RSS feed"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -514,17 +621,17 @@ class RSSManager:
             
             conn.commit()
             conn.close()
-            return True, "Feed added successfully"
+            return True, "Feed added"
             
         except sqlite3.IntegrityError:
             conn.close()
-            return False, "Feed already exists"
+            return False, "Feed exists"
         except Exception as e:
             conn.close()
             return False, str(e)
     
     def delete_feed(self, feed_id):
-        """Delete an RSS feed by ID"""
+        """Delete RSS feed"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -542,15 +649,13 @@ class RSSManager:
             conn.commit()
             conn.close()
             
-            logger.info(f"🗑️ Deleted feed: {feed_name}")
-            return True, f"Feed '{feed_name}' deleted successfully"
+            return True, f"Deleted: {feed_name}"
             
         except Exception as e:
-            logger.error(f"Error deleting feed: {e}")
             return False, str(e)
     
     def get_feeds(self, workspace_id):
-        """Get all feeds for workspace"""
+        """Get feeds"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -567,7 +672,7 @@ class RSSManager:
         return feeds
     
     def get_news_count(self, workspace_id, hours=48):
-        """Get count of news within specified hours"""
+        """Get news count"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
