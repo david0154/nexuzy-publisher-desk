@@ -111,11 +111,31 @@ class DraftGenerator:
         try:
             from ctransformers import AutoModelForCausalLM
             
+            # DEBUG: Show system info
+            logger.info(f"🔍 sys.frozen = {getattr(sys, 'frozen', False)}")
+            if getattr(sys, 'frozen', False):
+                logger.info(f"🔍 sys._MEIPASS = {sys._MEIPASS}")
+                logger.info(f"🔍 sys.executable = {sys.executable}")
+            
             base_path = self._get_base_path()
             
             # Search paths (try PyInstaller bundle first, then development)
-            possible_paths = [
-                # PyInstaller bundled models (in _internal folder)
+            possible_paths = []
+            
+            # If running from executable directory
+            if getattr(sys, 'frozen', False):
+                exe_dir = Path(sys.executable).parent
+                logger.info(f"🔍 exe_dir = {exe_dir}")
+                
+                # Check _internal folder relative to exe
+                possible_paths.extend([
+                    exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                    exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
+                    exe_dir / '_internal' / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
+                ])
+            
+            # PyInstaller bundled models (in sys._MEIPASS)
+            possible_paths.extend([
                 base_path / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
                 base_path / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
                 base_path / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
@@ -124,33 +144,27 @@ class DraftGenerator:
                 base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
                 base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
                 base_path / '_internal' / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
-                
-                # Development paths
+            ])
+            
+            # Development paths
+            possible_paths.extend([
                 Path(self.model_name),
                 Path('models') / self.model_file,
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,
-            ]
-            
-            # If running from executable directory (not frozen), check relative to exe
-            if getattr(sys, 'frozen', False):
-                exe_dir = Path(sys.executable).parent
-                possible_paths.insert(0, exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf')
-                possible_paths.insert(1, exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf')
-                possible_paths.insert(2, exe_dir / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf')
+            ])
             
             model_path = None
-            for path in possible_paths:
-                logger.debug(f"🔍 Checking: {path}")
-                if path.exists():
+            logger.info("🔍 Searching for GGUF model in the following paths:")
+            for i, path in enumerate(possible_paths, 1):
+                exists = path.exists()
+                logger.info(f"  [{i}] {path} - EXISTS: {exists}")
+                if exists and not model_path:
                     model_path = path
                     logger.info(f"✅ Found model: {model_path}")
-                    break
             
             if not model_path:
                 logger.error("❌ GGUF model not found")
-                logger.error("Searched paths:")
-                for path in possible_paths:
-                    logger.error(f"  - {path} [exists: {path.exists()}]")
+                logger.error("All searched paths returned False")
                 return None
             
             model_type = self._detect_model_type(model_path)
