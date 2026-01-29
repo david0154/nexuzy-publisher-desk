@@ -1,13 +1,14 @@
 """ 
-AI Draft Generation Module - LONG ARTICLES (800-2000 words) + WORKING IMAGE HANDLING
-Generates UNIQUE, comprehensive articles with LOCAL image storage (YOUR WORKING VERSION)
+AI Draft Generation Module - CLEAN ARTICLES (No Section Headers)
+Generates UNIQUE, comprehensive articles WITHOUT visible structure labels
 
 FEATURES:
 ✅ 800-2000 word articles
 ✅ Anti-plagiarism system
 ✅ Title uniqueness check
-✅ Local image download (YOUR ORIGINAL - WORKING!)
+✅ Local image download (WORKING!)
 ✅ Watermark detection
+✅ Clean output (no "Introduction:", "Main Details:" headers)
 """
 
 import sqlite3
@@ -61,7 +62,7 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (800-2000 words, Your Working Image Method)")
+            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output)")
     
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type"""
@@ -110,8 +111,8 @@ class DraftGenerator:
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type=model_type,
-                context_length=2048,       # For longer articles
-                max_new_tokens=1500,       # For longer articles
+                context_length=2048,
+                max_new_tokens=1500,
                 threads=4,
                 gpu_layers=0
             )
@@ -292,7 +293,7 @@ class DraftGenerator:
         return f"{category.lower()} development"
     
     def download_and_store_image(self, image_url: str, news_id: int) -> Optional[str]:
-        """✅ YOUR ORIGINAL - Download and store image locally (WORKING!)"""
+        """Download and store image locally"""
         if not image_url:
             return None
         
@@ -353,7 +354,7 @@ class DraftGenerator:
             workspace_id = cursor.fetchone()[0]
             conn.close()
             
-            # ✅ YOUR ORIGINAL - Download image locally
+            # Download image locally
             local_image_path = None
             if image_url:
                 local_image_path = self.download_and_store_image(image_url, news_id)
@@ -391,9 +392,8 @@ class DraftGenerator:
                 logger.error(f"❌ Generation failed: {error_msg}")
                 return {'error': error_msg, 'title': headline, 'body_draft': '', 'word_count': 0}
             
-            # ✅ YOUR ORIGINAL - Store both paths
             draft['image_url'] = image_url or ''
-            draft['local_image_path'] = local_image_path or ''  # YOUR WORKING METHOD
+            draft['local_image_path'] = local_image_path or ''
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
             draft['is_html'] = True
@@ -436,6 +436,7 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         style_instruction = random.choice(writing_styles)
         angle_instruction = random.choice(unique_angles)
         
+        # 🔧 IMPROVED PROMPT: Tell AI to NOT include section headers
         prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
 
 Headline: {headline}
@@ -443,41 +444,20 @@ Summary: {summary}
 
 {topic_context}
 
-Write a COMPREHENSIVE, DETAILED news article (1000-1200 words minimum) with these sections:
+Write a comprehensive news article (1000-1200 words). Structure your article naturally with:
+- Opening paragraph (hook and key facts)
+- Background information
+- Detailed analysis
+- Future implications
+- Strong conclusion
 
-1. INTRODUCTION (100-150 words):
-   - Compelling hook
-   - Key facts summary  
-   - Context
-
-2. BACKGROUND & CONTEXT (200-300 words):
-   - Historical context
-   - Relevant background
-   - Related developments
-
-3. MAIN DETAILS (400-500 words):
-   - Important facts
-   - Quotes and statistics
-   - Multiple angles
-   - Thorough explanation
-
-4. ANALYSIS & IMPACT (200-300 words):
-   - Implications
-   - Future outlook
-   - Who is affected
-
-5. CONCLUSION (100-150 words):
-   - Key takeaways
-   - Next developments
-
-Write in a UNIQUE, original style with:
-- Fresh perspective and creative phrasing
-- Natural, human-like flow
-- Specific details
-- Professional tone
-- NO generic phrases
-
-Aim for 1000-1200 words.
+IMPORTANT RULES:
+- DO NOT include section labels like "Introduction:", "Background:", "Conclusion:" etc.
+- DO NOT start sentences with "Industry experts note that" repeatedly
+- Write in flowing paragraphs without visible structure markers
+- Use natural transitions between topics
+- Professional journalism style
+- Original phrasing
 
 Article:"""
         
@@ -486,7 +466,7 @@ Article:"""
             
             generated_text = self.llm(
                 prompt,
-                max_new_tokens=1500,     # For 800-2000 words
+                max_new_tokens=1500,
                 temperature=0.85,
                 top_p=0.92,
                 repetition_penalty=1.2,
@@ -503,6 +483,7 @@ Article:"""
                 logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
                 return {'error': f'AI generated only {len(generated_text)} chars. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
+            # 🔧 CLEAN: Remove section headers
             cleaned_text = self._clean_generated_text(generated_text)
             
             if len(cleaned_text) < 500:
@@ -542,8 +523,7 @@ Article:"""
         
         starters = [
             'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
-            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, ',
-            'Industry experts note that ', 'Analysts suggest that '
+            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, '
         ]
         
         for i, sent in enumerate(sentences):
@@ -557,13 +537,17 @@ Article:"""
         return ''.join(varied_sentences)
     
     def _clean_generated_text(self, text: str) -> str:
-        """Clean AI-generated text"""
+        """
+        🔧 IMPROVED: Clean AI-generated text and remove section headers
+        """
         unwanted_phrases = [
             "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
             "[This article", "This content was", "As an AI", "I cannot", "I apologize"
         ]
         
         cleaned = text
+        
+        # Remove unwanted phrases
         for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
@@ -571,9 +555,39 @@ Article:"""
                     cleaned = cleaned[:pos].strip()
                     break
         
+        # 🔧 REMOVE SECTION HEADERS (case-insensitive)
+        section_headers = [
+            r'^\s*Introduction:\s*',
+            r'^\s*Background & Context:\s*',
+            r'^\s*Background and Context:\s*',
+            r'^\s*Main Details:\s*',
+            r'^\s*Analysis & Impact:\s*',
+            r'^\s*Analysis and Impact:\s*',
+            r'^\s*Conclusion:\s*',
+            r'^\s*Summary:\s*',
+            r'\n\s*Introduction:\s*',
+            r'\n\s*Background & Context:\s*',
+            r'\n\s*Background and Context:\s*',
+            r'\n\s*Main Details:\s*',
+            r'\n\s*Analysis & Impact:\s*',
+            r'\n\s*Analysis and Impact:\s*',
+            r'\n\s*Conclusion:\s*',
+        ]
+        
+        for pattern in section_headers:
+            cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # 🔧 REMOVE REPEATED SENTENCE STARTERS
+        # Remove lines that start with "Industry experts note that" at beginning of paragraphs
+        cleaned = re.sub(r'^Industry experts note that\s+', '', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r'\n\s*Industry experts note that\s+', '\n', cleaned, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
+        
+        logger.debug("🧹 Cleaned section headers and markers from text")
         
         return cleaned
     
@@ -587,16 +601,13 @@ Article:"""
             return False
     
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
-        """
-        ✅ YOUR ORIGINAL - Store draft WITH local image path in HTML (WORKING!)
-        """
+        """Store draft WITH local image path in HTML"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             html_body = draft.get('body_draft', '')
             
-            # ✅ YOUR ORIGINAL CODE - This was working for you!
             if draft.get('local_image_path'):
                 image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
                 html_body = image_html + html_body
@@ -631,7 +642,7 @@ Article:"""
             draft_id = cursor.lastrowid
             conn.close()
             
-            logger.info(f"✅ Stored draft {draft_id} with local image: {draft.get('local_image_path', 'None')[:50]}...")
+            logger.info(f"✅ Stored draft {draft_id}")
             
             return draft_id
         
@@ -640,10 +651,18 @@ Article:"""
             return 0
     
     def _convert_to_html(self, text: str) -> str:
-        """Convert text to HTML"""
+        """
+        🔧 IMPROVED: Convert text to HTML WITHOUT creating headers from section labels
+        """
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
+        
+        # Section labels to skip (don't convert to headers)
+        section_labels = [
+            'introduction', 'background', 'context', 'main details', 
+            'analysis', 'impact', 'conclusion', 'summary'
+        ]
         
         for line in lines:
             line = line.strip()
@@ -654,16 +673,18 @@ Article:"""
                     current_paragraph = []
                 continue
             
+            # Check if line is a section label (skip it)
+            line_lower = line.lower().rstrip(':')
+            if any(label in line_lower for label in section_labels) and len(line) < 40:
+                continue  # Skip section labels
+            
+            # Convert markdown headers
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
                 html_parts.append(f"<h2>{line.replace('##', '').strip()}</h2>")
-            elif line.endswith(':') and len(line) < 80 and len(line.split()) <= 8:
-                if current_paragraph:
-                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
-                    current_paragraph = []
-                html_parts.append(f"<h3>{line}</h3>")
+            # Don't convert short lines ending with ':' to headers anymore
             elif line.isupper() and len(line) < 60 and len(line.split()) > 1:
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
