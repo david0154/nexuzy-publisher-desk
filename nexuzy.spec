@@ -19,7 +19,7 @@ Output:
 import os
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -35,6 +35,25 @@ hiddenimports = [
     'jaraco.classes',
     'importlib_metadata',
     'zipp',
+    
+    # FIX: Add scipy (required by transformers)
+    'scipy',
+    'scipy.special',
+    'scipy.special.cython_special',
+    'scipy._lib',
+    'scipy._lib.messagestream',
+    'scipy.spatial',
+    'scipy.spatial.distance',
+    'scipy.spatial.transform',
+    'scipy.linalg',
+    'scipy.sparse',
+    'scipy.sparse.linalg',
+    'scipy.sparse.csgraph',
+    'scipy.ndimage',
+    'scipy.integrate',
+    'scipy.interpolate',
+    'scipy.optimize',
+    'scipy.stats',
     
     # Core dependencies
     'feedparser',
@@ -129,6 +148,23 @@ try:
 except:
     pass
 
+try:
+    hiddenimports += collect_submodules('scipy')
+except:
+    pass
+
+# Collect binaries
+binaries = []
+
+# Add scipy binaries
+try:
+    scipy_libs = collect_dynamic_libs('scipy')
+    if scipy_libs:
+        binaries += scipy_libs
+        print(f"✅ Collected {len(scipy_libs)} scipy libraries")
+except Exception as e:
+    print(f"⚠️  Scipy binaries: {e}")
+
 # Collect all data files
 datas = []
 
@@ -159,6 +195,14 @@ try:
     print("✅ importlib_metadata collected")
 except Exception as e:
     print(f"⚠️  importlib_metadata: {e}")
+
+# Add scipy data
+try:
+    print("⏳ Collecting scipy...")
+    datas += collect_data_files('scipy')
+    print("✅ scipy collected")
+except Exception as e:
+    print(f"⚠️  scipy: {e}")
 
 # Add transformers data
 try:
@@ -313,16 +357,17 @@ print(f"\nTotal models size: {total_size_gb:.2f} GB")
 print(f"\nExpected build size breakdown:")
 print(f"  📦 AI Models:          ~{total_size_gb:.1f} GB")
 print(f"  📦 PyTorch/Deps:       ~0.3 GB")
+print(f"  📦 Scipy:              ~0.1 GB")
 print(f"  📦 Other Libraries:    ~0.2 GB")
 print(f"  " + "─"*40)
-print(f"  📦 TOTAL:              ~{total_size_gb + 0.5:.1f} GB")
+print(f"  📦 TOTAL:              ~{total_size_gb + 0.6:.1f} GB")
 print("="*80 + "\n")
 
 # Analysis
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -333,13 +378,13 @@ a = Analysis(
         'matplotlib',
         'matplotlib.pyplot',
         'numpy.testing',
-        'scipy',
+        # DON'T exclude scipy - it's needed!
         'pandas',
         'IPython',
         'notebook',
         'jupyter',
         'pytest',
-        'setuptools._distutils',  # Changed: keep setuptools but exclude _distutils
+        'setuptools._distutils',
         'distutils',
         'test',
         'tests',
