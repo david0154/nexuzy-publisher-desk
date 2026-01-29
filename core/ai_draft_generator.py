@@ -100,6 +100,13 @@ class DraftGenerator:
         """
         Load GGUF model for long articles
         Works in both development and PyInstaller packaged app
+        
+        PyInstaller structure:
+        dist/Nexuzy Publisher Desk/
+            Nexuzy Publisher Desk.exe
+            _internal/
+                models/
+                    mistral-7b-instruct-v0.2.Q4_K_M.gguf  <-- Model is here!
         """
         try:
             from ctransformers import AutoModelForCausalLM
@@ -108,16 +115,28 @@ class DraftGenerator:
             
             # Search paths (try PyInstaller bundle first, then development)
             possible_paths = [
-                # PyInstaller bundled models
+                # PyInstaller bundled models (in _internal folder)
                 base_path / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
                 base_path / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
                 base_path / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
+                
+                # Also check if in _internal/models (alternative PyInstaller structure)
+                base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                base_path / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
+                base_path / '_internal' / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
                 
                 # Development paths
                 Path(self.model_name),
                 Path('models') / self.model_file,
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,
             ]
+            
+            # If running from executable directory (not frozen), check relative to exe
+            if getattr(sys, 'frozen', False):
+                exe_dir = Path(sys.executable).parent
+                possible_paths.insert(0, exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf')
+                possible_paths.insert(1, exe_dir / '_internal' / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf')
+                possible_paths.insert(2, exe_dir / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf')
             
             model_path = None
             for path in possible_paths:
@@ -131,7 +150,7 @@ class DraftGenerator:
                 logger.error("❌ GGUF model not found")
                 logger.error("Searched paths:")
                 for path in possible_paths:
-                    logger.error(f"  - {path}")
+                    logger.error(f"  - {path} [exists: {path.exists()}]")
                 return None
             
             model_type = self._detect_model_type(model_path)
