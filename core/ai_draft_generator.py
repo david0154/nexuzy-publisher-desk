@@ -9,6 +9,7 @@ FEATURES:
 ✅ Local image download (WORKING!)
 ✅ Watermark detection
 ✅ Clean output (no "Introduction:", "Main Details:" headers)
+✅ PyInstaller compatible (detects frozen state)
 """
 
 import sqlite3
@@ -64,6 +65,21 @@ class DraftGenerator:
         else:
             logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output)")
     
+    def _get_base_path(self) -> Path:
+        """
+        Get base path - works in both development and PyInstaller
+        """
+        if getattr(sys, 'frozen', False):
+            # Running in PyInstaller bundle
+            base_path = Path(sys._MEIPASS)
+            logger.info(f"📦 PyInstaller mode: base_path = {base_path}")
+        else:
+            # Running in normal Python
+            base_path = Path.cwd()
+            logger.info(f"💻 Development mode: base_path = {base_path}")
+        
+        return base_path
+    
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type"""
         filename_lower = str(model_path).lower()
@@ -81,20 +97,31 @@ class DraftGenerator:
             return 'llama'
     
     def _load_model(self):
-        """Load GGUF model for long articles"""
+        """
+        Load GGUF model for long articles
+        Works in both development and PyInstaller packaged app
+        """
         try:
             from ctransformers import AutoModelForCausalLM
             
+            base_path = self._get_base_path()
+            
+            # Search paths (try PyInstaller bundle first, then development)
             possible_paths = [
+                # PyInstaller bundled models
+                base_path / 'models' / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                base_path / 'models' / 'mistral-7b-instruct-v0.2.Q3_K_M.gguf',
+                base_path / 'models' / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
+                
+                # Development paths
                 Path(self.model_name),
                 Path('models') / self.model_file,
                 Path.home() / '.cache' / 'nexuzy' / 'models' / self.model_file,
-                Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
-                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
             ]
             
             model_path = None
             for path in possible_paths:
+                logger.debug(f"🔍 Checking: {path}")
                 if path.exists():
                     model_path = path
                     logger.info(f"✅ Found model: {model_path}")
@@ -102,6 +129,9 @@ class DraftGenerator:
             
             if not model_path:
                 logger.error("❌ GGUF model not found")
+                logger.error("Searched paths:")
+                for path in possible_paths:
+                    logger.error(f"  - {path}")
                 return None
             
             model_type = self._detect_model_type(model_path)
@@ -125,6 +155,8 @@ class DraftGenerator:
             return None
         except Exception as e:
             logger.error(f"❌ Error loading model: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def _load_sentence_model(self):
