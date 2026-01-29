@@ -1,5 +1,5 @@
 """ 
-RSS Manager - ULTIMATE IMAGE SEARCH WITH PERPLEXITY AI
+RSS Manager - ULTIMATE IMAGE SEARCH WITH PERPLEXITY AI (FIXED)
 Fetches news from RSS feeds with 4-level intelligent image fallback:
 - Level 1: 8 RSS image extraction methods
 - Level 2: Free stock photos (Unsplash/Pixabay)
@@ -42,7 +42,7 @@ class RSSManager:
         self.cleanup_hours = 48
         self.max_entries_per_feed = 20
         self.enable_web_search = True
-        self.enable_perplexity_search = True  # 🆕 Enable Perplexity AI search
+        self.enable_perplexity_search = True
         self.perplexity_api_key = self._load_perplexity_api_key()
     
     def _load_perplexity_api_key(self):
@@ -85,7 +85,6 @@ class RSSManager:
             logger.debug(f"Could not load from .env: {e}")
         
         logger.warning("⚠️ Perplexity API key not found. Add to config.json or environment variable.")
-        logger.info("💡 To enable Perplexity image search, add 'perplexity_api_key' to config.json")
         return None
     
     def _generate_url_hash(self, url):
@@ -226,7 +225,7 @@ class RSSManager:
     
     def _extract_search_keywords(self, headline):
         """
-        Extract clean keywords from headline (fallback option)
+        Extract clean keywords from headline
         """
         stop_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
                       'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
@@ -239,7 +238,7 @@ class RSSManager:
     
     def _search_perplexity_images(self, headline, category=""):
         """
-        🆕 PERPLEXITY AI IMAGE SEARCH - Ultimate fallback!
+        🆕 PERPLEXITY AI IMAGE SEARCH - Ultimate fallback! (FIXED)
         Uses Perplexity API to find relevant images across the web
         """
         try:
@@ -248,38 +247,34 @@ class RSSManager:
             
             logger.info(f"🤖 Perplexity AI searching for: '{headline[:60]}...'")
             
-            search_query = f"Find high quality image URL for: {headline}"
+            # Construct search query
+            search_query = f"Find a high quality, copyright-free image URL (direct link to .jpg, .png, or .webp) for this news headline: {headline}"
             if category:
-                search_query += f" (category: {category})"
+                search_query += f" Category: {category}. "
+            search_query += "Return ONLY the image URL from Unsplash, Pexels, Pixabay, or Wikimedia Commons. No explanations."
             
             headers = {
                 "Authorization": f"Bearer {self.perplexity_api_key}",
                 "Content-Type": "application/json"
             }
             
+            # 🔧 FIXED: Simplified payload without unsupported parameters
             payload = {
                 "model": "llama-3.1-sonar-small-128k-online",
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an image search assistant. When given a headline, find and return ONLY a single high-quality image URL (direct link to .jpg, .png, .webp, etc.) that best represents the topic. Return ONLY the URL, nothing else. The image must be from a reliable source like Unsplash, Pexels, Wikimedia Commons, or news websites. Do not return placeholder images or broken links."
+                        "content": "You are an image URL finder. Return ONLY a direct image URL (ending in .jpg, .png, .webp, etc.) from free stock photo sites like Unsplash, Pexels, Pixabay, or Wikimedia Commons. Return nothing else - just the URL."
                     },
                     {
                         "role": "user",
-                        "content": f"Find a high-quality image URL for this headline: {headline}"
+                        "content": search_query
                     }
                 ],
-                "max_tokens": 200,
-                "temperature": 0.2,
+                "max_tokens": 150,
+                "temperature": 0.1,
                 "top_p": 0.9,
-                "search_domain_filter": ["unsplash.com", "pexels.com", "pixabay.com"],
-                "return_images": False,
-                "return_related_questions": False,
-                "search_recency_filter": "month",
-                "top_k": 0,
-                "stream": False,
-                "presence_penalty": 0,
-                "frequency_penalty": 1
+                "stream": False
             }
             
             response = requests.post(
@@ -294,42 +289,59 @@ class RSSManager:
                 
                 if 'choices' in result and len(result['choices']) > 0:
                     content = result['choices'][0]['message']['content'].strip()
+                    logger.debug(f"Perplexity response: {content[:200]}")
                     
                     # Extract URL from response
-                    url_pattern = r'https?://[^\s<>"]+?\.(jpg|jpeg|png|gif|webp)(?:\?[^\s<>"]*)?'
+                    url_pattern = r'https?://[^\s<>"\)\]]+?\.(jpg|jpeg|png|gif|webp)(?:\?[^\s<>"\)\]]*)?'
                     urls = re.findall(url_pattern, content, re.IGNORECASE)
                     
                     if urls:
-                        for url_match in urls:
-                            full_url = content[content.find('http'):content.find(url_match[0]) + len(url_match[0])]
-                            if self._is_valid_image_url(full_url):
-                                logger.info(f"✅ Perplexity AI found: {full_url[:80]}")
-                                return full_url
+                        # Reconstruct full URL
+                        for match in urls:
+                            # Find the full URL in content
+                            start_idx = content.find('http')
+                            if start_idx != -1:
+                                # Find end of URL
+                                end_idx = start_idx
+                                for char in content[start_idx:]:
+                                    if char in [' ', '\n', ')', ']', '"', "'"]:
+                                        break
+                                    end_idx += 1
+                                
+                                full_url = content[start_idx:end_idx]
+                                if self._is_valid_image_url(full_url):
+                                    logger.info(f"✅ Perplexity AI found: {full_url[:80]}")
+                                    return full_url
                     
-                    # If no direct URL found, try to extract any URL from response
-                    simple_url = re.findall(r'https?://[^\s<>"]+', content)
-                    if simple_url:
-                        for url in simple_url:
-                            if self._is_valid_image_url(url):
-                                logger.info(f"✅ Perplexity AI found (alternative): {url[:80]}")
-                                return url
+                    # If no pattern match, try to extract any URL
+                    simple_urls = re.findall(r'https?://[^\s<>"\)\]]+', content)
+                    for url in simple_urls:
+                        if self._is_valid_image_url(url):
+                            logger.info(f"✅ Perplexity AI found (simple): {url[:80]}")
+                            return url
                     
-                    logger.warning(f"⚠️ Perplexity returned text but no valid image URL: {content[:100]}")
+                    logger.warning(f"⚠️ Perplexity returned: {content[:100]}... (no valid image URL)")
                 else:
                     logger.warning("⚠️ Perplexity returned empty response")
             else:
                 logger.error(f"❌ Perplexity API error: HTTP {response.status_code}")
-                logger.debug(f"Response: {response.text[:200]}")
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Error details: {error_detail}")
+                except:
+                    logger.error(f"Response text: {response.text[:300]}")
             
             return None
             
         except Exception as e:
             logger.error(f"❌ Perplexity search error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     def _search_free_stock_images(self, query, headline_full=""):
         """
-        Search free stock photo sites using FULL TITLE first, then keywords
+        Search free stock photo sites
         """
         try:
             search_query = headline_full[:80] if headline_full else query
@@ -363,25 +375,6 @@ class RSSManager:
                 except Exception as e:
                     logger.debug(f"Unsplash keyword search failed: {e}")
             
-            # Try Pixabay
-            try:
-                pixabay_search = f"https://pixabay.com/en/photos/search/{quote(search_query)}/"
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                response = requests.get(pixabay_search, headers=headers, timeout=5)
-                
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    img_tags = soup.find_all('img', class_=re.compile('.*?'))
-                    
-                    for img in img_tags:
-                        src = img.get('src') or img.get('data-lazy')
-                        if src and self._is_valid_image_url(src) and 'pixabay' in src:
-                            full_url = src.replace('_640', '_1280')
-                            logger.info(f"✅ Found Pixabay image: {full_url[:80]}")
-                            return full_url
-            except Exception as e:
-                logger.debug(f"Pixabay search failed: {e}")
-            
             logger.warning(f"⚠️ Web image search found nothing for: '{search_query}'")
             return None
             
@@ -391,17 +384,12 @@ class RSSManager:
     
     def extract_image_from_entry(self, entry, headline="", category=""):
         """
-        Extract image URL with 4-level search:
-        1. RSS feed (8 methods)
-        2. Free stock photos
-        3. 🆕 PERPLEXITY AI
-        4. None (will use placeholder later)
+        Extract image URL with 4-level search
         """
         image_url = None
         method_used = None
         
         # LEVEL 1: RSS extraction (8 methods)
-        # Method 1: media:content
         if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
                 if 'image' in media.get('type', '').lower():
@@ -410,14 +398,12 @@ class RSSManager:
                         method_used = "media:content"
                         break
         
-        # Method 2: media:thumbnail
         if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
             if isinstance(entry.media_thumbnail, list) and len(entry.media_thumbnail) > 0:
                 image_url = entry.media_thumbnail[0].get('url')
                 if self._is_valid_image_url(image_url):
                     method_used = "media:thumbnail"
         
-        # Method 3: Enclosures
         if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
             for enclosure in entry.enclosures:
                 enc_type = enclosure.get('type', '').lower()
@@ -427,7 +413,6 @@ class RSSManager:
                     method_used = "enclosure"
                     break
         
-        # Method 4-8: Other RSS methods (summary img, content img, og:image, twitter:image, link rel)
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -457,7 +442,7 @@ class RSSManager:
                 image_url = web_image
                 method_used = "stock photos"
         
-        # LEVEL 3: 🆕 PERPLEXITY AI
+        # LEVEL 3: PERPLEXITY AI
         if not image_url and self.enable_perplexity_search and self.perplexity_api_key and headline:
             logger.info(f"🤖 Trying Perplexity AI as final fallback...")
             perplexity_image = self._search_perplexity_images(headline, category)
@@ -567,9 +552,9 @@ class RSSManager:
                         
                         # Track source
                         if image_url:
-                            if 'perplexity' in str(image_url).lower() or 'AI' in str(image_url):
+                            if 'perplexity' in str(image_url).lower() or any(x in str(method_used or '').lower() for x in ['ai', 'perplexity']):
                                 img_ai += 1
-                            elif 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower():
+                            elif 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower() or 'pexels' in image_url.lower():
                                 img_stock += 1
                             else:
                                 img_rss += 1
