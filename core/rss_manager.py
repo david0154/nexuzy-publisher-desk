@@ -1,11 +1,11 @@
 """
-RSS Manager - Enhanced with Image Fallback & Delete Feed
-Fetches news from RSS feeds with advanced features:
+RSS Manager - Enhanced with BETTER Image Extraction
+Fetches news from RSS feeds with 8 image extraction methods:
 - URL-based duplicate detection
 - Headline similarity checking  
 - 48-hour automatic news cleanup
 - Smart image fallback with placeholder support
-- Delete feed functionality
+- Enhanced image URL extraction with detailed logging
 """
 
 import sqlite3
@@ -27,18 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 class RSSManager:
-    """Manage RSS feeds and fetch news articles with smart image fallback"""
+    """Manage RSS feeds and fetch news articles with enhanced image extraction"""
     
     def __init__(self, db_path='nexuzy.db'):
         self.db_path = db_path
-        self.cleanup_hours = 48  # Auto-delete news older than 48 hours
+        self.cleanup_hours = 48
         self.max_entries_per_feed = 20
     
     def _generate_url_hash(self, url):
         """Generate unique hash for URL deduplication"""
         if not url:
             return None
-        # Normalize URL (remove query params, trailing slash)
         clean_url = url.split('?')[0].rstrip('/')
         return hashlib.md5(clean_url.encode()).hexdigest()
     
@@ -61,7 +60,6 @@ class RSSManager:
             return False
         
         cursor = conn.cursor()
-        # Check exact match first
         cursor.execute('''
             SELECT COUNT(*) FROM news_queue 
             WHERE workspace_id = ? AND headline = ?
@@ -70,7 +68,6 @@ class RSSManager:
         if cursor.fetchone()[0] > 0:
             return True
         
-        # Check for very similar headlines (first 50 chars)
         headline_prefix = headline[:50].lower()
         cursor.execute('''
             SELECT COUNT(*) FROM news_queue 
@@ -85,7 +82,6 @@ class RSSManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if settings table has placeholder_image column
             cursor.execute("PRAGMA table_info(ads_settings)")
             columns = [col[1] for col in cursor.fetchall()]
             
@@ -98,7 +94,6 @@ class RSSManager:
                     return result[0]
             
             conn.close()
-            # Default placeholder if not configured
             return "https://via.placeholder.com/1200x630/3498db/ffffff?text=Nexuzy+Publisher+Desk"
             
         except Exception as e:
@@ -114,11 +109,9 @@ class RSSManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Calculate cutoff time
             cutoff_time = datetime.now() - timedelta(hours=hours)
             cutoff_str = cutoff_time.isoformat()
             
-            # Delete old news
             cursor.execute('''
                 DELETE FROM news_queue 
                 WHERE workspace_id = ? 
@@ -128,7 +121,6 @@ class RSSManager:
             
             deleted_count = cursor.rowcount
             
-            # Also clean up orphaned drafts (news_id no longer exists)
             cursor.execute('''
                 DELETE FROM ai_drafts 
                 WHERE workspace_id = ? 
@@ -150,39 +142,71 @@ class RSSManager:
     def _is_today_news(self, publish_date_str):
         """Check if news is from today"""
         try:
-            # Parse various date formats
             from dateutil import parser
             pub_date = parser.parse(publish_date_str)
             today = datetime.now().date()
             return pub_date.date() == today
         except:
-            # If can't parse, assume it's recent
             return True
     
-    def extract_image_from_entry(self, entry):
-        """Extract image URL from RSS entry"""
+    def _is_valid_image_url(self, url):
+        """Validate if URL looks like an image URL"""
+        if not url:
+            return False
+        
+        url_lower = url.lower()
+        
+        # Skip data URIs (too large for storage)
+        if url_lower.startswith('data:image'):
+            return False
+        
+        # Must start with http/https
+        if not url_lower.startswith(('http://', 'https://')):
+            return False
+        
+        # Good signs: image extensions or image-related paths
+        image_indicators = [
+            '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+            '/image/', '/images/', '/img/', '/media/',
+            'image=', 'img=', 'photo', 'picture'
+        ]
+        
+        return any(indicator in url_lower for indicator in image_indicators)
+    
+    def extract_image_from_entry(self, entry, headline=""):
+        """
+        🔧 IMPROVED: Extract image URL from RSS entry with 8 methods + detailed logging
+        """
         image_url = None
+        method_used = None
         
-        # Method 1: Check media content
-        if hasattr(entry, 'media_content'):
+        # Method 1: media:content tags
+        if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
-                if 'image' in media.get('type', ''):
+                if 'image' in media.get('type', '').lower():
                     image_url = media.get('url')
-                    break
+                    if self._is_valid_image_url(image_url):
+                        method_used = "media:content"
+                        break
         
-        # Method 2: Check media thumbnail
-        if not image_url and hasattr(entry, 'media_thumbnail'):
-            if entry.media_thumbnail:
+        # Method 2: media:thumbnail tags
+        if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+            if isinstance(entry.media_thumbnail, list) and len(entry.media_thumbnail) > 0:
                 image_url = entry.media_thumbnail[0].get('url')
+                if self._is_valid_image_url(image_url):
+                    method_used = "media:thumbnail"
         
-        # Method 3: Check enclosures
-        if not image_url and hasattr(entry, 'enclosures'):
+        # Method 3: Enclosures
+        if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
             for enclosure in entry.enclosures:
-                if 'image' in enclosure.get('type', ''):
-                    image_url = enclosure.get('href')
+                enc_type = enclosure.get('type', '').lower()
+                enc_url = enclosure.get('href', '')
+                if 'image' in enc_type or self._is_valid_image_url(enc_url):
+                    image_url = enc_url
+                    method_used = "enclosure"
                     break
         
-        # Method 4: Parse from summary/description HTML
+        # Method 4: Summary/description HTML <img>
         if not image_url:
             summary = entry.get('summary', entry.get('description', ''))
             if summary:
@@ -190,21 +214,69 @@ class RSSManager:
                 img_tag = soup.find('img')
                 if img_tag and img_tag.get('src'):
                     image_url = img_tag.get('src')
+                    if self._is_valid_image_url(image_url):
+                        method_used = "summary <img>"
         
-        # Method 5: Check for image in content
-        if not image_url and hasattr(entry, 'content'):
+        # Method 5: Content HTML <img>
+        if not image_url and hasattr(entry, 'content') and entry.content:
             for content in entry.content:
                 soup = BeautifulSoup(content.get('value', ''), 'html.parser')
                 img_tag = soup.find('img')
                 if img_tag and img_tag.get('src'):
                     image_url = img_tag.get('src')
-                    break
+                    if self._is_valid_image_url(image_url):
+                        method_used = "content <img>"
+                        break
+        
+        # 🆕 Method 6: OpenGraph images (og:image)
+        if not image_url:
+            summary = entry.get('summary', entry.get('description', ''))
+            if summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                og_image = soup.find('meta', property='og:image')
+                if og_image and og_image.get('content'):
+                    image_url = og_image.get('content')
+                    if self._is_valid_image_url(image_url):
+                        method_used = "og:image meta"
+        
+        # 🆕 Method 7: Twitter Card images
+        if not image_url:
+            summary = entry.get('summary', entry.get('description', ''))
+            if summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
+                if twitter_image and twitter_image.get('content'):
+                    image_url = twitter_image.get('content')
+                    if self._is_valid_image_url(image_url):
+                        method_used = "twitter:image meta"
+        
+        # 🆕 Method 8: Link tags with image rel
+        if not image_url and hasattr(entry, 'links'):
+            for link in entry.links:
+                if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
+                    link_url = link.get('href')
+                    if self._is_valid_image_url(link_url):
+                        image_url = link_url
+                        method_used = "link rel=image"
+                        break
+        
+        # Final validation
+        if image_url and not self._is_valid_image_url(image_url):
+            logger.debug(f"❌ Invalid image URL rejected: {image_url[:80]}")
+            image_url = None
+            method_used = None
+        
+        # Logging
+        if image_url:
+            logger.info(f"✅ Image found via [{method_used}]: {image_url[:80]}... for '{headline[:40]}...'")
+        else:
+            logger.warning(f"⚠️  NO IMAGE found for: {headline[:60]}... (tried 8 methods)")
         
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
         """
-        Fetch latest news from all active RSS feeds with smart image fallback
+        Fetch latest news from all active RSS feeds with enhanced image extraction
         
         Args:
             workspace_id: Current workspace
@@ -212,19 +284,16 @@ class RSSManager:
         """
         
         if not DEPENDENCIES_AVAILABLE:
-            raise ImportError("RSS Manager requires feedparser and beautifulsoup4. Install with: pip install feedparser beautifulsoup4 requests")
+            raise ImportError("RSS Manager requires feedparser and beautifulsoup4")
         
-        # Get placeholder image for this workspace
         placeholder_image = self.get_placeholder_image(workspace_id)
         
-        # First, cleanup old news (48-hour auto-delete)
         logger.info("🧹 Running 48-hour cleanup...")
         deleted_count = self.cleanup_old_news(workspace_id)
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Get all active feeds for this workspace
         cursor.execute('''
             SELECT id, feed_name, url, category 
             FROM rss_feeds 
@@ -239,13 +308,13 @@ class RSSManager:
         
         total_fetched = 0
         total_skipped = 0
+        images_found = 0
+        images_missing = 0
         
         for feed_id, feed_name, feed_url, category in feeds:
             try:
-                # Parse RSS feed with timeout
                 logger.info(f"📰 Fetching from: {feed_name} ({feed_url})")
                 
-                # Use requests with User-Agent to avoid blocks
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -254,66 +323,55 @@ class RSSManager:
                     response = requests.get(feed_url, headers=headers, timeout=10)
                     feed = feedparser.parse(response.content)
                 except:
-                    # Fallback to direct feedparser
                     feed = feedparser.parse(feed_url)
                 
                 if not feed.entries:
-                    logger.warning(f"⚠️ No entries found in feed: {feed_url}")
+                    logger.warning(f"⚠️  No entries found in feed: {feed_url}")
                     continue
                 
                 logger.info(f"✅ Found {len(feed.entries)} entries in {feed_name}")
                 
-                # Process each entry (limit to configured max)
                 for entry in feed.entries[:self.max_entries_per_feed]:
                     try:
-                        # Extract data
                         headline = entry.get('title', 'No title').strip()
-                        
-                        # Get summary/description
                         summary = entry.get('summary', entry.get('description', ''))
                         
-                        # Clean HTML from summary
                         if summary:
                             soup = BeautifulSoup(summary, 'html.parser')
                             summary = soup.get_text(separator=' ', strip=True)[:800]
                         
                         source_url = entry.get('link', '')
                         
-                        # Skip if no valid data
                         if not headline or len(headline) < 10:
                             continue
                         
-                        # Get publish date
                         publish_date = entry.get('published', entry.get('updated', datetime.now().isoformat()))
                         
-                        # Filter: Today only if requested
                         if today_only and not self._is_today_news(publish_date):
                             total_skipped += 1
                             continue
                         
-                        # DUPLICATE CHECK #1: URL
                         if self._check_duplicate_url(conn, workspace_id, source_url):
                             total_skipped += 1
                             continue
                         
-                        # DUPLICATE CHECK #2: Headline
                         if self._check_duplicate_headline(conn, workspace_id, headline):
                             total_skipped += 1
                             continue
                         
-                        # Get domain
                         source_domain = urlparse(source_url).netloc if source_url else feed_name
                         source_domain = source_domain.replace('www.', '')
                         
-                        # Extract image URL
-                        image_url = self.extract_image_from_entry(entry)
+                        # 🔧 IMPROVED: Extract image with detailed logging
+                        image_url = self.extract_image_from_entry(entry, headline)
                         
-                        # 📷 SMART IMAGE FALLBACK: Use placeholder if no image found
-                        if not image_url:
+                        if image_url:
+                            images_found += 1
+                        else:
+                            images_missing += 1
                             image_url = placeholder_image
-                            logger.debug(f"Using placeholder image for: {headline[:50]}")
+                            logger.debug(f"📷 Using placeholder for: {headline[:50]}")
                         
-                        # Insert into news_queue
                         cursor.execute('''
                             INSERT INTO news_queue 
                             (workspace_id, headline, summary, source_url, source_domain, 
@@ -338,17 +396,17 @@ class RSSManager:
         conn.close()
         
         result_msg = f"✅ Successfully fetched {total_fetched} new articles!"
+        result_msg += f"\n📷 Images: {images_found} found, {images_missing} using placeholder"
         if deleted_count > 0:
             result_msg += f"\n🧹 Cleaned up {deleted_count} old news (48h+ old)"
         if total_skipped > 0:
-            result_msg += f"\n⏭️ Skipped {total_skipped} duplicates"
+            result_msg += f"\n⏭️  Skipped {total_skipped} duplicates"
         
-        logger.info(f"🎉 Total: {total_fetched} new | {total_skipped} skipped | {deleted_count} cleaned")
+        logger.info(f"🎉 Total: {total_fetched} new | {images_found} images | {total_skipped} skipped")
         return total_fetched, result_msg
     
     def add_feed(self, workspace_id, feed_name, feed_url, category='General'):
         """Add a new RSS feed"""
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -371,12 +429,10 @@ class RSSManager:
     
     def delete_feed(self, feed_id):
         """Delete an RSS feed by ID"""
-        
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # First, get feed name for logging
             cursor.execute('SELECT feed_name FROM rss_feeds WHERE id = ?', (feed_id,))
             result = cursor.fetchone()
             
@@ -385,14 +441,12 @@ class RSSManager:
                 return False, "Feed not found"
             
             feed_name = result[0]
-            
-            # Delete the feed
             cursor.execute('DELETE FROM rss_feeds WHERE id = ?', (feed_id,))
             
             conn.commit()
             conn.close()
             
-            logger.info(f"🗑️ Deleted feed: {feed_name}")
+            logger.info(f"🗑️  Deleted feed: {feed_name}")
             return True, f"Feed '{feed_name}' deleted successfully"
             
         except Exception as e:
@@ -401,7 +455,6 @@ class RSSManager:
     
     def get_feeds(self, workspace_id):
         """Get all feeds for workspace"""
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
