@@ -3,7 +3,7 @@ AI Draft Generation Module - CLEAN ARTICLES (No Section Headers)
 Generates UNIQUE, comprehensive articles WITHOUT visible structure labels
 
 FEATURES:
-✅ 800-2000 word articles
+✅ 800-2500 word articles
 ✅ Pre-writing angle selection (ONE clear focus)
 ✅ Neutral tone enforcement
 ✅ Grammar and spelling checking
@@ -103,7 +103,7 @@ ARTICLE_ANGLES = {
 }
 
 class DraftGenerator:
-    """Generate UNIQUE, LONG AI-rewritten news articles (800-2000 words)"""
+    """Generate UNIQUE, LONG AI-rewritten news articles (800-2500 words)"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
         global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _GRAMMAR_CHECKER
@@ -142,7 +142,7 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output, Grammar Check, Neutral Tone)")
+            logger.info("✅ AI Writer LOADED (800-2500 words, Clean Output, Grammar Check, Neutral Tone)")
     
     def _load_grammar_checker(self):
         """Load grammar and spelling checker"""
@@ -329,7 +329,7 @@ class DraftGenerator:
             
             model_type = self._detect_model_type(model_path)
             logger.info(f"🔍 Model type: {model_type}")
-            logger.info("⏳ Loading for long articles (800-2000 words)...")
+            logger.info("⏳ Loading for long articles (800-2500 words)...")
             
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
@@ -720,7 +720,7 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         # Create opening hook
         opening_hook = self._create_neutral_opening(topic_nouns, angle, summary)
         
-        # 🔥 IMPROVED PROMPT with neutral tone and no speeches
+        # 🔥 IMPROVED PROMPT with 800-2500 word range
         prompt = f"""You are a professional journalist writing a factual news article. Write in a neutral, objective tone without sensationalism.
 
 Article Angle: {angle_instruction}
@@ -732,7 +732,7 @@ Summary: {summary}
 
 Opening Hook (use this as your first sentence): {opening_hook}
 
-Write a comprehensive news article (1000-1500 words). Requirements:
+Write a comprehensive news article (800-2500 words). Requirements:
 
 NEUTRAL TONE:
 1. Use factual, objective language
