@@ -5,7 +5,7 @@ Generates articles that bypass AI detectors (under 5% AI detection)
 FEATURES:
 ✅ 450-2500 word flexible articles
 ✅ 95%+ human-like writing (under 5% AI detection)
-✅ ULTRA-AGGRESSIVE humanization with contractions
+✅ BALANCED humanization with contractions
 ✅ Dramatic sentence length variation (burstiness)
 ✅ Natural conversational tone
 ✅ Unpredictable flow patterns
@@ -61,7 +61,7 @@ SYNONYM_DICT = {
     'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to', 'enable', 'empower', 'bolster'],
     'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain', 'posit', 'contend'],
     'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect', 'perceive', 'discern'],
-    'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend', 'grasp', 'appreciate'],
+    'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend', 'grasp'],
     'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearn for'],
     'need': ['require', 'necessitate', 'demand', 'call for', 'warrant', 'entail'],
     'look': ['appear', 'seem', 'indicate', 'suggest', 'signal', 'point to'],
@@ -674,7 +674,7 @@ class DraftGenerator:
             # 🔥 NEUTRAL TITLE REWRITE
             new_title = self._rewrite_title_neutral(headline, category, topic_info)
             
-            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.upper()} angle...")
+            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.UPPER()} angle...")
             
             draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info, selected_angle, topic_nouns)
             
@@ -706,10 +706,29 @@ class DraftGenerator:
             logger.error(traceback.format_exc())
             return {'error': str(e)}
     
+    def _is_complete_sentence(self, text: str) -> bool:
+        """Check if text is a complete sentence (not a fragment)"""
+        text = text.strip()
+        if not text:
+            return False
+        
+        # Check for incomplete fragments
+        incomplete_endings = [
+            ' while', ' but', ' and', ' or', ' yet', ' so',
+            ' because', ' although', ' though', ' if', ' when',
+            ' where', ' which', ' that', ' who', ' whom'
+        ]
+        
+        for ending in incomplete_endings:
+            if text.lower().endswith(ending):
+                return False
+        
+        # Must have some content and end with punctuation
+        return len(text.split()) >= 3 and text[-1] in '.!?'
+    
     def _humanize_text_advanced(self, text: str) -> str:
         """
-        🔥 ULTRA-AGGRESSIVE HUMANIZATION: Make text 95%+ human-like
-        Reduces AI detection from 76% to under 20%
+        🔥 BALANCED HUMANIZATION: Make text human-like without over-processing
         """
         paragraphs = text.split('\n\n')
         humanized_paragraphs = []
@@ -723,8 +742,8 @@ class DraftGenerator:
                     humanized_sentences.append(sent)
                     continue
                 
-                # 🔥 INCREASE: Add contractions (85% chance, was 60%)
-                if random.random() < 0.85:
+                # BALANCED: Add contractions (55% chance, reduced from 85%)
+                if random.random() < 0.55:
                     contractions = {
                         ' do not ': " don't ", ' does not ': " doesn't ",
                         ' did not ': " didn't ", ' is not ': " isn't ",
@@ -736,47 +755,44 @@ class DraftGenerator:
                         ' cannot ': " can't ", ' it is ': " it's ",
                         ' that is ': " that's ", ' there is ': " there's ",
                         ' they are ': " they're ", ' we are ': " we're ",
-                        ' you are ': " you're ", ' I am ': " I'm ",
-                        ' he is ': " he's ", ' she is ': " she's ",
-                        ' who is ': " who's ", ' what is ': " what's ",
-                        ' where is ': " where's ", ' when is ': " when's "
+                        ' you are ': " you're "
                     }
                     for full, contracted in contractions.items():
                         if full in sent.lower():
-                            # Replace case-insensitively
                             sent = re.sub(re.escape(full), contracted, sent, flags=re.IGNORECASE)
                 
-                # 🔥 INCREASE: Add conversational starters (25% chance, was 15%)
-                if i % 4 == 0 and random.random() < 0.25 and len(sent) > 30:
+                # BALANCED: Add conversational starters (12% chance, reduced from 25%)
+                # Only if sentence is complete and doesn't already have a starter
+                if (i % 5 == 0 and random.random() < 0.12 and len(sent) > 40 and 
+                    self._is_complete_sentence(sent)):
                     conversational_starters = [
-                        "Here's the thing: ", "To be fair, ", "Honestly, ",
-                        "In reality, ", "The thing is, ", "That said, ",
-                        "What's interesting is that ", "It turns out ",
-                        "The reality is ", "At this point, ", "Truth be told, ",
-                        "Let's be clear: ", "Here's what's happening: ",
-                        "In other words, ", "Simply put, ", "To be honest, ",
-                        "Basically, ", "Look, ", "Well, ", "Now, "
+                        "In fact, ", "Notably, ", "Importantly, ",
+                        "Meanwhile, ", "However, ", "Additionally, "
                     ]
                     starter = random.choice(conversational_starters)
-                    if not any(sent.strip().startswith(cs.strip()) for cs in conversational_starters):
-                        if sent.strip()[0].isupper():
+                    # Check sentence doesn't already start with transition word
+                    if not any(sent.strip().startswith(cs.strip().rstrip(',')) for cs in conversational_starters):
+                        if sent.strip() and sent.strip()[0].isupper():
                             sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
                 
-                # 🔥 INCREASE: Start with And/But/Yet (20% chance, was 10%)
-                if random.random() < 0.20 and i > 0 and len(sent) > 25:
-                    if not sent.strip().startswith(('And', 'But', 'Yet', 'So', 'Still')):
-                        connectors = ['And ', 'But ', 'Yet ', 'So ', 'Still ', 'Plus, ']
-                        if sent.strip()[0].isupper():
+                # BALANCED: Start with And/But (10% chance, reduced from 20%)
+                if (random.random() < 0.10 and i > 0 and len(sent) > 30 and 
+                    self._is_complete_sentence(sent)):
+                    if not sent.strip().startswith(('And', 'But', 'Yet', 'So', 'Still', 'However', 'Meanwhile')):
+                        connectors = ['But ', 'Yet ', 'So ']
+                        if sent.strip() and sent.strip()[0].isupper():
                             sent = random.choice(connectors) + sent.strip()[0].lower() + sent.strip()[1:]
                 
                 humanized_sentences.append(sent)
             
-            humanized_paragraphs.append(''.join(humanized_sentences))
+            # Join and validate no incomplete sentences
+            para_text = ''.join(humanized_sentences)
+            humanized_paragraphs.append(para_text)
         
         return '\n\n'.join(humanized_paragraphs)
     
     def _vary_sentence_lengths_dramatically(self, text: str) -> str:
-        """🔥 ULTRA-AGGRESSIVE: Create EXTREME variation in sentence lengths"""
+        """🔥 Create variation in sentence lengths with better validation"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied = []
         
@@ -788,21 +804,23 @@ class DraftGenerator:
                 i += 1
                 continue
             
-            # 🔥 INCREASE: Every 3-4 sentences (was every 5), combine two short ones
-            if i % 3 == 0 and i + 2 < len(sentences):
+            # Every 4 sentences (reduced from 3), try to combine short ones
+            if i % 4 == 0 and i + 2 < len(sentences):
                 next_sent = sentences[i + 2] if i + 2 < len(sentences) else None
-                if next_sent and len(sent.split()) < 15 and len(next_sent.split()) < 15:
-                    # Combine two short sentences with varied connectors
-                    connectors = [', and ', ', but ', ', yet ', ', so ', ' - ', '; ', ', though ', ', while ']
-                    connector = random.choice(connectors)
-                    if next_sent.strip()[0].isupper():
-                        combined = sent.strip() + connector + next_sent.strip()[0].lower() + next_sent.strip()[1:]
-                    else:
-                        combined = sent.strip() + connector + next_sent.strip()
-                    varied.append(combined)
-                    varied.append(sentences[i + 1])  # Add the period/punctuation
-                    i += 3
-                    continue
+                if next_sent and len(sent.split()) < 12 and len(next_sent.split()) < 12:
+                    # Validate both are complete before combining
+                    if self._is_complete_sentence(sent) and self._is_complete_sentence(next_sent):
+                        # Combine two short sentences with varied connectors
+                        connectors = [', and ', ', but ', ', yet ']
+                        connector = random.choice(connectors)
+                        if next_sent.strip() and next_sent.strip()[0].isupper():
+                            combined = sent.strip() + connector + next_sent.strip()[0].lower() + next_sent.strip()[1:]
+                        else:
+                            combined = sent.strip() + connector + next_sent.strip()
+                        varied.append(combined)
+                        varied.append(sentences[i + 1])  # Add the period/punctuation
+                        i += 3
+                        continue
             
             varied.append(sent)
             i += 1
@@ -811,7 +829,7 @@ class DraftGenerator:
     
     def _apply_synonym_variation(self, text: str) -> str:
         """
-        🔥 ULTRA-AGGRESSIVE: Apply more synonym replacement
+        🔥 BALANCED: Apply synonym replacement
         """
         words = text.split()
         varied_words = []
@@ -820,13 +838,13 @@ class DraftGenerator:
         for i, word in enumerate(words):
             word_lower = word.lower().strip('.,!?;:')
             
-            # Skip if last word was replaced (avoid over-replacement)
-            if last_replacement and i - last_replacement < 2:  # Reduced from 3 to 2
+            # Skip if last word was replaced
+            if last_replacement and i - last_replacement < 3:
                 varied_words.append(word)
                 continue
             
-            # 🔥 INCREASE: 45% chance to replace with synonym (was 30%)
-            if word_lower in SYNONYM_DICT and random.random() < 0.45:
+            # BALANCED: 30% chance to replace with synonym (reduced from 45%)
+            if word_lower in SYNONYM_DICT and random.random() < 0.30:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
                 if word and word[0].isupper():
@@ -852,7 +870,7 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         # Create opening hook
         opening_hook = self._create_neutral_opening(topic_nouns, angle, summary)
         
-        # 🔥 IMPROVED PROMPT - emphasizes word count
+        # 🔥 IMPROVED PROMPT - emphasizes word count and COMPLETE sentences
         prompt = f"""Write a comprehensive news article. MINIMUM 500 WORDS REQUIRED. Write at least 6-8 detailed paragraphs.
 
 Article Focus: {angle_instruction}
@@ -865,29 +883,27 @@ Summary: {summary}
 IMPORTANT REQUIREMENTS:
 - Write AT LEAST 500 words (target 600-800 words)
 - Write 6-8 substantial paragraphs
-- Each paragraph should be 3-5 sentences
+- Each paragraph should be 3-5 COMPLETE sentences
+- EVERY SENTENCE MUST BE COMPLETE - no fragments ending with 'while', 'but', etc.
 - DO NOT STOP EARLY - keep writing until you reach at least 500 words
 
 HUMAN WRITING STYLE:
 - Use contractions naturally (don't, it's, they're, won't, can't)
-- Vary sentence lengths dramatically (mix very short and longer sentences)
-- Occasionally start sentences with And, But, or Yet
-- Write like you're explaining to a friend - conversational but informative
-- Mix formal and casual tones naturally
-- Show personality - not robotic
-- Use phrases like "Here's the thing" or "To be honest" occasionally
-- Don't be too perfect - write naturally
+- Vary sentence lengths (mix short and longer sentences)
+- Write like a professional journalist - clear and informative
+- Be direct and factual
+- NO unnecessary transitions at sentence beginnings
 
 AVOID:
-- Perfect uniform grammar throughout
-- Same sentence structure repeatedly
-- Overly formal language everywhere
+- Incomplete sentences or fragments
+- Starting every sentence with transition words
+- Overly casual language
 - Section headers ("Introduction:", "Background:")
 - Clichés ("only time will tell", "remains to be seen")
-- Long speeches or quotes (max 1-2 sentences per quote, 2-3 quotes total)
+- Long speeches or quotes (max 1-2 sentences per quote)
 - Stopping before 500 words!
 
-Write the full article now (MINIMUM 500 words, naturally like a human journalist):
+Write the full article now (MINIMUM 500 words, complete sentences only):
 
 """
         
@@ -901,11 +917,11 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 # 🔥 FIXED: Increased max_new_tokens and reduced stop sequences
                 generated_text = self.llm(
                     prompt,
-                    max_new_tokens=2500,  # Increased from 1500
-                    temperature=0.92,      # Slightly higher for more variation
-                    top_p=0.95,            # Higher for more creativity
-                    repetition_penalty=1.25,  # Balanced for natural repetition
-                    stop=["\n\n\n\n"],  # Only stop on 4 newlines (removed aggressive stops)
+                    max_new_tokens=2500,
+                    temperature=0.88,      # Slightly reduced for more coherent output
+                    top_p=0.92,
+                    repetition_penalty=1.25,
+                    stop=["\n\n\n\n"],
                     stream=False
                 )
                 
@@ -917,45 +933,42 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 
                 logger.info(f"📊 Generated {word_count} words (raw)")
                 
-                # 🔥 CHECK: If too short, retry with more aggressive prompt
+                # 🔥 CHECK: If too short, retry
                 if word_count < 300:
                     logger.warning(f"⚠️  Too short ({word_count} words), retrying...")
                     retry_count += 1
-                    # Make prompt more aggressive
                     prompt = prompt.replace("MINIMUM 500 WORDS", f"CRITICAL: WRITE AT LEAST 600 WORDS")
                     prompt = prompt.replace("6-8 paragraphs", "8-10 paragraphs")
                     continue
                 
                 # Clean text
                 cleaned_text = self._clean_generated_text(generated_text)
-                
-                # Remove long speeches and excessive quotes
                 cleaned_text = self._remove_long_speeches(cleaned_text)
                 
                 cleaned_word_count = len(cleaned_text.split())
                 logger.info(f"📊 After cleaning: {cleaned_word_count} words")
                 
                 if cleaned_word_count < 200:
-                    logger.error(f"❌ Too short after cleaning ({cleaned_word_count} words), retrying...")
+                    logger.error(f"❌ Too short after cleaning, retrying...")
                     retry_count += 1
                     continue
                 
-                # 🔥 ULTRA-AGGRESSIVE HUMANIZATION LAYERS
-                logger.info("🔥 Applying ULTRA-AGGRESSIVE humanization layers...")
+                # 🔥 BALANCED HUMANIZATION LAYERS
+                logger.info("🔥 Applying BALANCED humanization...")
                 
-                # Layer 1: AGGRESSIVE Synonym variation (45% chance, was 30%)
+                # Layer 1: Synonym variation (30%)
                 varied_text = self._apply_synonym_variation(cleaned_text)
                 
                 # Layer 2: Sentence structure variation
                 restructured_text = self._vary_sentence_structure(varied_text)
                 
-                # Layer 3: ULTRA-AGGRESSIVE HUMANIZATION (85% contractions, 25% conversational)
+                # Layer 3: BALANCED HUMANIZATION (55% contractions, 12% conversational)
                 humanized_text = self._humanize_text_advanced(restructured_text)
                 
-                # Layer 4: EXTREME sentence length variation (every 3 sentences, was 5)
+                # Layer 4: Sentence length variation (every 4 sentences)
                 burst_text = self._vary_sentence_lengths_dramatically(humanized_text)
                 
-                # Layer 5: Boost uniqueness
+                # Layer 5: Boost uniqueness (moderate)
                 boosted_text = self._boost_uniqueness(burst_text, topic_info)
                 
                 # Layer 6: Advanced paraphrasing
@@ -967,7 +980,7 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 final_word_count = len(final_text.split())
                 uniqueness_score = self._calculate_uniqueness_score(final_text)
                 
-                logger.info(f"✅ ULTRA-HUMANIZED article: {final_word_count} words, uniqueness: {uniqueness_score:.1%}")
+                logger.info(f"✅ HUMANIZED article: {final_word_count} words, uniqueness: {uniqueness_score:.1%}")
                 
                 return {
                     'title': headline,
@@ -976,7 +989,7 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                     'word_count': final_word_count,
                     'uniqueness_score': uniqueness_score,
                     'is_ai_generated': True,
-                    'generation_mode': 'ultra_humanized_v8_aggressive',
+                    'generation_mode': 'balanced_humanized_v9',
                     'retry_count': retry_count
                 }
                 
@@ -988,23 +1001,19 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                     logger.error(traceback.format_exc())
                     return {'error': f"AI generation failed after {max_retries} attempts: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
         
-        # If all retries failed
         return {'error': f'Failed to generate article after {max_retries} attempts', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
     def _remove_long_speeches(self, text: str) -> str:
-        """🔥 NEW: Remove long speeches and excessive quotes"""
-        # Find quoted sections
-        quote_pattern = r'"([^"]{100,})"'  # Quotes longer than 100 chars
+        """Remove long speeches and excessive quotes"""
+        quote_pattern = r'"([^"]{100,})"'
         
         def shorten_quote(match):
             full_quote = match.group(1)
-            # Keep only first sentence
             sentences = re.split(r'[.!?]+', full_quote)
             if sentences:
                 return f'"{sentences[0].strip()}."'
             return match.group(0)
         
-        # Shorten long quotes
         text = re.sub(quote_pattern, shorten_quote, text)
         
         # Remove rhetorical patterns
@@ -1018,7 +1027,6 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         for pattern in rhetorical_patterns:
             text = re.sub(pattern, '', text)
         
-        # Limit consecutive paragraphs with quotes
         paragraphs = text.split('\n\n')
         filtered_paragraphs = []
         consecutive_quotes = 0
@@ -1026,7 +1034,7 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         for para in paragraphs:
             if '"' in para:
                 consecutive_quotes += 1
-                if consecutive_quotes <= 2:  # Max 2 consecutive quote paragraphs
+                if consecutive_quotes <= 2:
                     filtered_paragraphs.append(para)
             else:
                 consecutive_quotes = 0
@@ -1044,15 +1052,17 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 varied_sentences.append(sent)
                 continue
             
-            # 🔥 INCREASE: 30% chance to restructure (was 20%)
-            if random.random() < 0.30 and len(sent) > 40:
+            # Reduced to 20% chance (from 30%)
+            if random.random() < 0.20 and len(sent) > 40:
                 if ', ' in sent:
                     parts = sent.split(', ', 1)
                     if len(parts) == 2 and len(parts[1]) > 20:
-                        if parts[1][0].islower():
-                            sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
-                        else:
-                            sent = f"{parts[1]}, while {parts[0].lower()}"
+                        # Only restructure if result is complete
+                        if self._is_complete_sentence(parts[1]):
+                            if parts[1][0].islower():
+                                sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
+                            else:
+                                sent = f"{parts[1]}, while {parts[0].lower()}"
             
             varied_sentences.append(sent)
         
@@ -1078,9 +1088,8 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         
         for sent in sentences:
             if sent.strip() and sent not in ['. ', '! ', '? ']:
-                # 🔥 INCREASE: 50% chance (was 30%)
                 for wordy, concise in phrase_replacements.items():
-                    if random.random() < 0.50:
+                    if random.random() < 0.40:  # Reduced from 50%
                         sent = sent.replace(wordy, concise)
             
             paraphrased_sentences.append(sent)
@@ -1122,32 +1131,35 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
+        # More conservative transition words
         starters = [
-            'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
-            'Notably, ', 'Significantly, ', 'Importantly, ',
-            'Recent reports suggest that ', 'Data indicates that ',
-            'Meanwhile, ', 'Conversely, ', 'In contrast, ', 'As a result, ',
-            'Consequently, ', 'Nevertheless, ', 'On the other hand, ',
-            'Interestingly, ', 'Remarkably, ', 'In fact, ',
+            'Additionally, ', 'However, ', 'Meanwhile, ',
+            'In particular, ', 'Notably, ', 'Furthermore, ',
+            'Importantly, ', 'As a result, ', 'Consequently, ',
+            'Nevertheless, ', 'In fact, '
         ]
         
         used_starters = set()
         
-        # 🔥 INCREASE: Every 3 sentences (was every 4)
+        # Reduced frequency: Every 5 sentences (was 3)
         for i, sent in enumerate(sentences):
-            if i > 0 and i % 3 == 0 and sent.strip() and len(sent) > 20:
-                available_starters = [s for s in starters if s not in used_starters]
-                if not available_starters:
-                    used_starters.clear()
-                    available_starters = starters
-                
-                if not any(sent.strip().startswith(s.strip()) for s in starters):
-                    # 🔥 INCREASE: 60% chance (was 50%)
-                    if random.random() > 0.40:
-                        starter = random.choice(available_starters)
-                        used_starters.add(starter)
-                        if sent.strip()[0].isupper():
-                            sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
+            if i > 0 and i % 5 == 0 and sent.strip() and len(sent) > 25:
+                # Only add starter to complete sentences
+                if self._is_complete_sentence(sent):
+                    available_starters = [s for s in starters if s not in used_starters]
+                    if not available_starters:
+                        used_starters.clear()
+                        available_starters = starters
+                    
+                    # Check sentence doesn't already have a starter
+                    if not any(sent.strip().startswith(s.strip().rstrip(',')) for s in starters):
+                        # Reduced to 40% chance (was 60%)
+                        if random.random() < 0.40:
+                            starter = random.choice(available_starters)
+                            used_starters.add(starter)
+                            if sent.strip() and sent.strip()[0].isupper():
+                                sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
+            
             varied_sentences.append(sent)
         
         return ''.join(varied_sentences)
