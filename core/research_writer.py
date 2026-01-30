@@ -1,6 +1,7 @@
 """
 Research Writer Module - AI-Powered Research & Article Generation
 Features: Web search, Article scraping, AI analysis, Auto-generated articles with citations
+🔥 NOW USES SAME AI MODEL as AI Draft Generator (GLOBAL CACHE SHARED)
 """
 
 import logging
@@ -11,6 +12,7 @@ import sqlite3
 from pathlib import Path
 import re
 import time
+import random
 from urllib.parse import urlparse
 
 try:
@@ -20,15 +22,140 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# GLOBAL MODEL CACHE - shared with AI Draft Generator
+_CACHED_MODEL = None
+_CACHED_SENTENCE_MODEL = None
+
+# Import synonym dictionary and uniqueness functions from ai_draft_generator
+try:
+    from core.ai_draft_generator import SYNONYM_DICT, TITLE_PATTERNS
+except:
+    # Fallback if import fails
+    SYNONYM_DICT = {
+        'said': ['stated', 'mentioned', 'noted', 'explained', 'announced'],
+        'new': ['recent', 'latest', 'fresh', 'novel', 'emerging'],
+        'important': ['crucial', 'vital', 'essential', 'critical', 'key'],
+    }
+    TITLE_PATTERNS = ["{topic}: What This Means", "{topic}: Analysis"]
+
 class ResearchWriter:
     """AI-powered research and article generation engine"""
     
-    def __init__(self, db_path: str = 'nexuzy.db', cache_articles: bool = True):
+    def __init__(self, db_path: str = 'nexuzy.db', cache_articles: bool = True, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
+        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL
+        
         self.db_path = db_path
         self.cache_articles = cache_articles
         self.article_cache = {}  # In-memory cache
         self.session = self._create_session()
+        self.model_name = model_name
         self._ensure_research_table()
+        
+        # Use GLOBAL cached model (shared with AI Draft Generator)
+        if _CACHED_MODEL:
+            logger.info("✅ Research Writer using GLOBAL cached AI model (shared with AI Draft Generator)")
+            self.llm = _CACHED_MODEL
+        else:
+            logger.info("⏳ Loading AI model for Research Writer (will be shared with AI Draft Generator)...")
+            self.llm = self._load_model()
+            if self.llm:
+                _CACHED_MODEL = self.llm
+                logger.info("💾 Model cached GLOBALLY for Research Writer + AI Draft Generator")
+        
+        if _CACHED_SENTENCE_MODEL:
+            self.sentence_model = _CACHED_SENTENCE_MODEL
+        else:
+            self.sentence_model = self._load_sentence_model()
+            if self.sentence_model:
+                _CACHED_SENTENCE_MODEL = self.sentence_model
+        
+        if not self.llm:
+            logger.warning("⚠️ Research Writer operating without AI model - will use template generation")
+        else:
+            logger.info("✅ Research Writer LOADED with AI model (800-2000 words, enhanced uniqueness)")
+    
+    def _detect_model_type(self, model_path: Path) -> str:
+        """Auto-detect model type"""
+        filename_lower = str(model_path).lower()
+        
+        if 'phi-2' in filename_lower or 'phi2' in filename_lower:
+            return 'phi'
+        elif 'mistral' in filename_lower:
+            return 'mistral'
+        elif 'llama' in filename_lower or 'tinyllama' in filename_lower:
+            return 'llama'
+        elif 'qwen' in filename_lower:
+            return 'qwen'
+        else:
+            logger.warning(f"⚠️ Could not detect model type, defaulting to 'llama'")
+            return 'llama'
+    
+    def _load_model(self):
+        """Load GGUF model (same as AI Draft Generator)"""
+        try:
+            from ctransformers import AutoModelForCausalLM
+            
+            model_file = Path(self.model_name).name
+            
+            possible_paths = [
+                Path(self.model_name),
+                Path('models') / model_file,
+                Path.home() / '.cache' / 'nexuzy' / 'models' / model_file,
+                Path('models') / 'mistral-7b-instruct-v0.2.Q4_K_M.gguf',
+                Path('models') / 'tinyllama-1.1b-chat-v1.0.Q8_0.gguf',
+            ]
+            
+            model_path = None
+            for path in possible_paths:
+                if path.exists():
+                    model_path = path
+                    logger.info(f"✅ Found model: {model_path}")
+                    break
+            
+            if not model_path:
+                logger.error("❌ GGUF model not found")
+                return None
+            
+            model_type = self._detect_model_type(model_path)
+            logger.info(f"🔍 Model type: {model_type}")
+            logger.info("⏳ Loading for research articles (800-2000 words)...")
+            
+            llm = AutoModelForCausalLM.from_pretrained(
+                str(model_path),
+                model_type=model_type,
+                context_length=2048,
+                max_new_tokens=1500,
+                threads=4,
+                gpu_layers=0
+            )
+            
+            logger.info(f"✅ Model loaded: {model_path.name}")
+            return llm
+        
+        except ImportError:
+            logger.error("❌ ctransformers not installed")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error loading model: {e}")
+            return None
+    
+    def _load_sentence_model(self):
+        """Load sentence improvement model (optional)"""
+        try:
+            from transformers import pipeline
+            logger.info("Loading sentence improvement model...")
+            
+            model = pipeline(
+                "text2text-generation",
+                model="google/flan-t5-base",
+                max_length=150,
+                device=-1
+            )
+            logger.info("✅ Sentence model loaded")
+            return model
+        except Exception as e:
+            logger.warning(f"⚠️ Sentence model unavailable: {e}")
+            return None
     
     def _create_session(self) -> requests.Session:
         """Create configured requests session"""
@@ -65,6 +192,7 @@ class ResearchWriter:
                              word_count: int = 1500) -> Dict:
         """
         Complete research workflow: Search → Scrape → Analyze → Generate
+        🔥 NOW USES SAME AI MODEL AS AI DRAFT GENERATOR
         
         Args:
             topic: Research topic
@@ -74,7 +202,7 @@ class ResearchWriter:
         Returns:
             Dict with generated article and metadata
         """
-        logger.info(f"🔬 Starting research for: {topic}")
+        logger.info(f"🔬 Starting AI research for: {topic}")
         start_time = time.time()
         
         # Check cache
@@ -117,9 +245,9 @@ class ResearchWriter:
             logger.info("🧠 Step 3: Analyzing content...")
             key_points = self._extract_key_points(articles, topic)
             
-            # Step 4: Generate article
-            logger.info(f"✍️  Step 4: Generating {word_count}-word article...")
-            article = self._generate_article(topic, key_points, articles, word_count)
+            # Step 4: Generate article WITH AI MODEL (same as AI Draft Generator)
+            logger.info(f"✍️ Step 4: Generating {word_count}-word article with AI model...")
+            article = self._generate_article_with_ai(topic, key_points, articles, word_count)
             
             # Step 5: Add citations and format
             logger.info("📚 Step 5: Adding citations...")
@@ -135,7 +263,7 @@ class ResearchWriter:
                 'word_count': len(formatted_article.split()),
                 'sources': [{'url': a.get('url'), 'title': a.get('title')} for a in articles],
                 'generation_time': f"{elapsed:.1f}s",
-                'status': '✅ Article generated successfully'
+                'status': '✅ Article generated successfully with AI model'
             }
             
             # Cache result
@@ -147,6 +275,8 @@ class ResearchWriter:
         
         except Exception as e:
             logger.error(f"❌ Research generation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 'success': False,
                 'error': str(e),
@@ -315,13 +445,13 @@ class ResearchWriter:
         
         return key_points[:15]
     
-    def _generate_article(self, 
-                         topic: str, 
-                         key_points: List[str], 
-                         articles: List[Dict],
-                         target_words: int) -> str:
+    def _generate_article_with_ai(self, 
+                                 topic: str, 
+                                 key_points: List[str], 
+                                 articles: List[Dict],
+                                 target_words: int) -> str:
         """
-        Generate article from key points using AI/LLM
+        🔥 NEW: Generate article using SAME AI MODEL as AI Draft Generator
         Falls back to template-based generation if LLM unavailable
         
         Args:
@@ -333,26 +463,243 @@ class ResearchWriter:
         Returns:
             Generated article text
         """
-        try:
-            # Try to use transformers pipeline if available
-            from transformers import pipeline
-            generator = pipeline('text-generation', model='gpt2', max_new_tokens=500)
-            
-            prompt = f"Write a comprehensive article about {topic}:\n"
-            article_text = generator(prompt, do_sample=True, top_p=0.95)[0]['generated_text']
-            logger.info("   Using AI-generated content")
-        except Exception as e:
-            logger.debug(f"AI generation not available: {e}, using template")
-            article_text = self._template_article(topic, key_points, articles)
+        if not self.llm:
+            logger.warning("⚠️ AI model not available, using template generation")
+            return self._template_article(topic, key_points, articles)
         
-        return article_text
+        try:
+            # Prepare research context from scraped articles
+            research_context = self._prepare_research_context(key_points, articles)
+            
+            # Human-like writing styles (same as AI Draft Generator)
+            writing_styles = [
+                "Write like an experienced researcher with expertise in this field",
+                "Write in a clear, accessible style that educates readers",
+                "Write with authority backed by research and data",
+                "Write in an analytical style connecting research to real-world applications",
+                "Write comprehensively, exploring multiple perspectives",
+            ]
+            
+            style_instruction = random.choice(writing_styles)
+            
+            # 🔥 ENHANCED PROMPT with research context and uniqueness requirements
+            prompt = f"""You are a professional researcher and writer. {style_instruction}
+
+Topic: {topic}
+
+Research Context:
+{research_context}
+
+Write a comprehensive, UNIQUE research-based article ({target_words} words). Requirements:
+
+WRITING STYLE:
+1. Write naturally with varied sentence structure (mix short and long sentences)
+2. Use active voice with strategic passive voice
+3. Include specific details and evidence from research
+4. Connect ideas with smooth, logical transitions
+5. Write professionally but accessibly
+6. Vary paragraph length (2-5 sentences)
+7. Use concrete examples and data points
+8. Add analytical insights and interpretation
+
+UNIQUENESS REQUIREMENTS:
+1. NEVER copy phrases from typical articles
+2. Use original phrasing and fresh vocabulary
+3. Present information from unique analytical angles
+4. Include deep analysis and interpretation
+5. Connect to broader implications
+6. Use varied sentence beginnings and structures
+
+CRITICAL - DO NOT:
+- Include section labels ("Introduction:", "Background:", etc.)
+- Use repetitive sentence starters
+- Write in a robotic, predictable style
+- Include meta-commentary
+- Use cliché phrases
+
+Write the research article now in flowing, natural paragraphs:
+
+Article:"""
+            
+            logger.info("⏳ Generating research article with AI model (60-90 seconds)...")
+            
+            generated_text = self.llm(
+                prompt,
+                max_new_tokens=1500,
+                temperature=0.90,
+                top_p=0.95,
+                repetition_penalty=1.35,
+                stop=["\n\n\n\n", "Article:", "Summary:", "Note:", "Disclaimer:"],
+                stream=False
+            )
+            
+            if not generated_text or not isinstance(generated_text, str):
+                generated_text = str(generated_text) if generated_text else ""
+            
+            generated_text = generated_text.strip()
+            
+            if len(generated_text) < 500:
+                logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
+                return self._template_article(topic, key_points, articles)
+            
+            # Clean and enhance uniqueness (same methods as AI Draft Generator)
+            cleaned_text = self._clean_generated_text(generated_text)
+            varied_text = self._apply_synonym_variation(cleaned_text)
+            restructured_text = self._vary_sentence_structure(varied_text)
+            final_text = self._boost_uniqueness(restructured_text)
+            
+            word_count = len(final_text.split())
+            logger.info(f"✅ AI generated {word_count} words")
+            
+            return final_text
+        
+        except Exception as e:
+            logger.error(f"❌ AI generation failed: {e}, using template")
+            import traceback
+            logger.error(traceback.format_exc())
+            return self._template_article(topic, key_points, articles)
+    
+    def _prepare_research_context(self, key_points: List[str], articles: List[Dict]) -> str:
+        """Prepare research context summary for AI"""
+        context_parts = []
+        
+        if key_points:
+            context_parts.append("Key Research Findings:")
+            for i, point in enumerate(key_points[:8], 1):
+                context_parts.append(f"• {point}")
+        
+        if articles:
+            context_parts.append(f"\nBased on {len(articles)} authoritative sources")
+        
+        return "\n".join(context_parts)
+    
+    def _apply_synonym_variation(self, text: str) -> str:
+        """Apply synonym replacement (same as AI Draft Generator)"""
+        words = text.split()
+        varied_words = []
+        last_replacement = None
+        
+        for i, word in enumerate(words):
+            word_lower = word.lower().strip('.,!?;:')
+            
+            if last_replacement and i - last_replacement < 3:
+                varied_words.append(word)
+                continue
+            
+            if word_lower in SYNONYM_DICT and random.random() < 0.40:
+                synonym = random.choice(SYNONYM_DICT[word_lower])
+                if word and word[0].isupper():
+                    synonym = synonym.capitalize()
+                varied_words.append(synonym)
+                last_replacement = i
+            else:
+                varied_words.append(word)
+        
+        return ' '.join(varied_words)
+    
+    def _vary_sentence_structure(self, text: str) -> str:
+        """Vary sentence structure (same as AI Draft Generator)"""
+        sentences = re.split(r'([.!?]\s+)', text)
+        varied_sentences = []
+        
+        for i, sent in enumerate(sentences):
+            if not sent.strip() or sent in ['. ', '! ', '? ']:
+                varied_sentences.append(sent)
+                continue
+            
+            if random.random() < 0.25 and len(sent) > 40:
+                if ', ' in sent:
+                    parts = sent.split(', ', 1)
+                    if len(parts) == 2 and len(parts[1]) > 20:
+                        if parts[1][0].islower():
+                            sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
+                        else:
+                            sent = f"{parts[1]}, while {parts[0].lower()}"
+            
+            varied_sentences.append(sent)
+        
+        return ''.join(varied_sentences)
+    
+    def _boost_uniqueness(self, text: str) -> str:
+        """Boost uniqueness with varied connectors (same as AI Draft Generator)"""
+        sentences = re.split(r'([.!?]\s+)', text)
+        varied_sentences = []
+        
+        starters = [
+            'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
+            'Notably, ', 'Significantly, ', 'Research indicates that ', 
+            'According to studies, ', 'Data suggests that ', 'Evidence shows that ',
+            'Meanwhile, ', 'In contrast, ', 'As a result, ', 'Consequently, ',
+            'Interestingly, ', 'Remarkably, ', 'In fact, ', 'What\'s more, ',
+            'From this perspective, ', 'Taking into account these findings, ',
+        ]
+        
+        used_starters = set()
+        
+        for i, sent in enumerate(sentences):
+            if i > 0 and i % 4 == 0 and sent.strip() and len(sent) > 20:
+                available_starters = [s for s in starters if s not in used_starters]
+                if not available_starters:
+                    used_starters.clear()
+                    available_starters = starters
+                
+                if not any(sent.strip().startswith(s.strip()) for s in starters):
+                    if random.random() > 0.4:
+                        starter = random.choice(available_starters)
+                        used_starters.add(starter)
+                        sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
+            varied_sentences.append(sent)
+        
+        return ''.join(varied_sentences)
+    
+    def _clean_generated_text(self, text: str) -> str:
+        """Clean AI-generated text (same as AI Draft Generator)"""
+        unwanted_phrases = [
+            "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
+            "[This article", "This content was", "As an AI", "I cannot", "I apologize",
+            "In conclusion,", "To summarize,", "In summary,", "To sum up,",
+        ]
+        
+        cleaned = text
+        
+        for phrase in unwanted_phrases:
+            if phrase in cleaned:
+                pos = cleaned.find(phrase)
+                if pos > 500:
+                    cleaned = cleaned[:pos].strip()
+                    break
+        
+        section_patterns = [
+            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
+            r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
+        ]
+        
+        for pattern in section_patterns:
+            cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
+        cleaned = cleaned.strip()
+        
+        return cleaned
+    
+    def _generate_article(self, 
+                         topic: str, 
+                         key_points: List[str], 
+                         articles: List[Dict],
+                         target_words: int) -> str:
+        """
+        DEPRECATED: Use _generate_article_with_ai instead
+        Kept for backward compatibility
+        """
+        return self._generate_article_with_ai(topic, key_points, articles, target_words)
     
     def _template_article(self, 
                          topic: str, 
                          key_points: List[str], 
                          articles: List[Dict]) -> str:
         """
-        Generate article using template-based approach
+        Generate article using template-based approach (fallback)
         
         Args:
             topic: Article topic
