@@ -5,10 +5,12 @@ Generates UNIQUE, comprehensive articles WITHOUT visible structure labels
 FEATURES:
 ✅ 800-2000 word articles
 ✅ Anti-plagiarism system
-✅ Title uniqueness check
+✅ MANDATORY title uniqueness and rewrite
+✅ Enhanced human-like writing
 ✅ Local image download (WORKING!)
 ✅ Watermark detection
 ✅ Clean output (no "Introduction:", "Main Details:" headers)
+✅ Synonym variation for uniqueness
 """
 
 import sqlite3
@@ -30,6 +32,39 @@ logger = logging.getLogger(__name__)
 # GLOBAL MODEL CACHE
 _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
+
+# Enhanced synonym dictionary for uniqueness
+SYNONYM_DICT = {
+    'said': ['stated', 'mentioned', 'noted', 'explained', 'announced', 'revealed', 'reported', 'disclosed'],
+    'new': ['recent', 'latest', 'fresh', 'novel', 'emerging', 'modern', 'contemporary'],
+    'big': ['significant', 'substantial', 'considerable', 'major', 'large-scale', 'extensive'],
+    'important': ['crucial', 'vital', 'essential', 'critical', 'key', 'significant', 'pivotal'],
+    'show': ['demonstrate', 'illustrate', 'reveal', 'indicate', 'display', 'exhibit'],
+    'many': ['numerous', 'multiple', 'several', 'various', 'countless'],
+    'good': ['positive', 'beneficial', 'favorable', 'advantageous', 'promising'],
+    'bad': ['negative', 'adverse', 'unfavorable', 'detrimental', 'problematic'],
+    'make': ['create', 'produce', 'generate', 'develop', 'establish'],
+    'use': ['utilize', 'employ', 'apply', 'leverage', 'implement'],
+    'get': ['obtain', 'acquire', 'receive', 'secure', 'gain'],
+    'very': ['extremely', 'highly', 'particularly', 'exceptionally', 'remarkably'],
+    'problem': ['issue', 'challenge', 'concern', 'difficulty', 'complication'],
+    'change': ['transform', 'modify', 'alter', 'adjust', 'revise'],
+    'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to'],
+}
+
+# Title rewrite templates
+TITLE_PATTERNS = [
+    "{topic}: What This Means for {audience}",
+    "Breaking: {topic} - Key Details Revealed",
+    "{topic}: A Comprehensive Analysis",
+    "Understanding {topic}: The Full Story",
+    "{topic}: Impact and Implications",
+    "How {topic} Will Change {industry}",
+    "{topic}: Expert Analysis and Insights",
+    "The Truth About {topic}: What You Need to Know",
+    "{topic}: Latest Developments and Updates",
+    "Inside {topic}: Complete Report",
+]
 
 class DraftGenerator:
     """Generate UNIQUE, LONG AI-rewritten news articles (800-2000 words)"""
@@ -189,6 +224,61 @@ class DraftGenerator:
             'sports': ['team', 'player', 'match', 'game', 'win', 'championship', 'score', 'sport', 'athlete', 'coach', 'tournament', 'league', 'competition', 'season', 'victory'],
         }
     
+    def _rewrite_title_mandatory(self, original_headline: str, category: str, topic_info: Dict) -> str:
+        """
+        🔥 MANDATORY title rewrite - ALWAYS creates unique title
+        """
+        logger.info(f"🔄 Rewriting title (MANDATORY): {original_headline}")
+        
+        # Extract key topic
+        words = original_headline.split()
+        capitalized = [w for w in words if w and len(w) > 2 and w[0].isupper()]
+        
+        # Get main topic (first 2-3 capitalized words or main subject)
+        if capitalized:
+            topic = ' '.join(capitalized[:3])
+        else:
+            # Use first 3-5 words
+            topic = ' '.join(words[:5])
+        
+        # Determine audience based on category
+        audience_map = {
+            'Technology': 'Tech Industry',
+            'Business': 'Investors',
+            'Politics': 'Citizens',
+            'Health': 'Public Health',
+            'Sports': 'Fans',
+            'Entertainment': 'Audiences',
+        }
+        audience = audience_map.get(category, 'Readers')
+        
+        industry_map = {
+            'Technology': 'the Tech Sector',
+            'Business': 'Markets',
+            'Politics': 'Governance',
+            'Health': 'Healthcare',
+            'Sports': 'Sports World',
+            'Entertainment': 'Entertainment Industry',
+        }
+        industry = industry_map.get(category, 'the Industry')
+        
+        # Select random pattern
+        pattern = random.choice(TITLE_PATTERNS)
+        
+        # Apply pattern
+        new_title = pattern.format(topic=topic, audience=audience, industry=industry)
+        
+        # Verify uniqueness
+        uniqueness_check = self._check_title_uniqueness(new_title)
+        
+        if not uniqueness_check['is_unique']:
+            # If still not unique, add timestamp-based variation
+            new_title = f"{topic}: Complete Analysis ({datetime.now().strftime('%B %Y')})"
+            logger.warning(f"⚠️  Pattern title not unique, using timestamped version")
+        
+        logger.info(f"✅ NEW TITLE: {new_title}")
+        return new_title
+    
     def _check_title_uniqueness(self, proposed_title: str) -> Dict:
         """Check if title already exists"""
         try:
@@ -328,7 +418,7 @@ class DraftGenerator:
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
-        """Generate UNIQUE, LONG article (800-2000 words)"""
+        """Generate UNIQUE, LONG article (800-2000 words) with MANDATORY title rewrite"""
         try:
             if not self.llm:
                 error_msg = "❌ AI model not loaded"
@@ -376,21 +466,17 @@ class DraftGenerator:
             
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
-            # CHECK TITLE UNIQUENESS
-            title_check = self._check_title_uniqueness(headline)
-            if not title_check['is_unique']:
-                logger.warning(f"⚠️  Title exists! Using unique variant")
-                logger.info(f"💡 New title: {title_check['suggestion']}")
-                headline = title_check['suggestion']
+            # 🔥 MANDATORY TITLE REWRITE - ALWAYS generates new unique title
+            new_title = self._rewrite_title_mandatory(headline, category, topic_info)
             
-            logger.info(f"🤖 Generating LONG UNIQUE article (800-2000 words): {headline[:50]}...")
+            logger.info(f"🤖 Generating LONG UNIQUE article (800-2000 words): {new_title[:50]}...")
             
-            draft = self._generate_with_model(headline, summary, category, source_domain, topic_info)
+            draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info)
             
             if 'error' in draft or not draft.get('body_draft'):
                 error_msg = draft.get('error', 'AI generation failed')
                 logger.error(f"❌ Generation failed: {error_msg}")
-                return {'error': error_msg, 'title': headline, 'body_draft': '', 'word_count': 0}
+                return {'error': error_msg, 'title': new_title, 'body_draft': '', 'word_count': 0}
             
             draft['image_url'] = image_url or ''
             draft['local_image_path'] = local_image_path or ''
@@ -409,34 +495,57 @@ class DraftGenerator:
             logger.error(traceback.format_exc())
             return {'error': str(e)}
     
+    def _apply_synonym_variation(self, text: str) -> str:
+        """
+        🔥 NEW: Apply synonym replacement for uniqueness
+        """
+        words = text.split()
+        varied_words = []
+        
+        for word in words:
+            word_lower = word.lower().strip('.,!?;:')
+            
+            # 30% chance to replace with synonym
+            if word_lower in SYNONYM_DICT and random.random() < 0.3:
+                synonym = random.choice(SYNONYM_DICT[word_lower])
+                # Preserve capitalization
+                if word[0].isupper():
+                    synonym = synonym.capitalize()
+                varied_words.append(synonym)
+            else:
+                varied_words.append(word)
+        
+        return ' '.join(varied_words)
+    
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate LONG article with anti-plagiarism"""
+        """Generate LONG article with anti-plagiarism and human touch"""
         
         topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
+        # Human-like writing styles
         writing_styles = [
-            "Write in an investigative journalism style",
-            "Write in an analytical news reporting style",
-            "Write in a feature article narrative style",
-            "Write in a breaking news reporting style",
-            "Write in an explanatory journalism style"
+            "Write like an experienced journalist with 10+ years experience",
+            "Write in a clear, accessible style that engages readers",
+            "Write with authority and depth, like a subject matter expert",
+            "Write in a narrative style that tells the complete story",
+            "Write analytically, connecting facts to broader implications"
         ]
         
         unique_angles = [
-            "Focus on the broader implications and context",
-            "Emphasize the human impact and real-world effects",
-            "Analyze the technical and strategic aspects",
-            "Explore the historical background and future outlook",
-            "Examine the economic and social dimensions"
+            "Focus on the real-world impact and practical implications",
+            "Emphasize the human stories and personal experiences involved",
+            "Analyze the strategic and economic dimensions",
+            "Explore historical context and future projections",
+            "Examine the technical details and underlying mechanisms"
         ]
         
         style_instruction = random.choice(writing_styles)
         angle_instruction = random.choice(unique_angles)
         
-        # 🔧 IMPROVED PROMPT: Tell AI to NOT include section headers
+        # 🔥 IMPROVED PROMPT with human touch instructions
         prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
 
 Headline: {headline}
@@ -444,33 +553,37 @@ Summary: {summary}
 
 {topic_context}
 
-Write a comprehensive news article (1000-1200 words). Structure your article naturally with:
-- Opening paragraph (hook and key facts)
-- Background information
-- Detailed analysis
-- Future implications
-- Strong conclusion
+Write a comprehensive news article (1000-1200 words). Requirements:
 
-IMPORTANT RULES:
-- DO NOT include section labels like "Introduction:", "Background:", "Conclusion:" etc.
-- DO NOT start sentences with "Industry experts note that" repeatedly
-- Write in flowing paragraphs without visible structure markers
-- Use natural transitions between topics
-- Professional journalism style
-- Original phrasing
+1. Write naturally with varied sentence structure (mix short and long sentences)
+2. Use active voice predominantly  
+3. Include specific details, quotes, and facts
+4. Connect ideas with smooth transitions
+5. Write conversationally but professionally
+6. Vary paragraph length (2-5 sentences)
+7. Use concrete examples when possible
+
+CRITICAL - DO NOT:
+- Include section labels ("Introduction:", "Background:", "Conclusion:")
+- Start multiple paragraphs with "Industry experts note that"
+- Use repetitive sentence starters
+- Write in a robotic, formulaic style
+- Include meta-commentary about the article itself
+
+Write the article now in flowing, natural paragraphs:
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating LONG content (60-90 seconds)...")
+            logger.info("⏳ Generating LONG content with human touch (60-90 seconds)...")
             
             generated_text = self.llm(
                 prompt,
                 max_new_tokens=1500,
-                temperature=0.85,
-                top_p=0.92,
-                repetition_penalty=1.2,
-                stop=["\n\n\n\n", "Article:", "Summary:"],
+                temperature=0.88,  # Slightly higher for more creativity
+                top_p=0.93,
+                repetition_penalty=1.25,  # Stronger penalty
+                stop=["\n\n\n\n", "Article:", "Summary:", "Note:"],
                 stream=False
             )
             
@@ -483,14 +596,20 @@ Article:"""
                 logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
                 return {'error': f'AI generated only {len(generated_text)} chars. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # 🔧 CLEAN: Remove section headers
+            # 🔧 CLEAN: Remove section headers and repetitive phrases
             cleaned_text = self._clean_generated_text(generated_text)
             
             if len(cleaned_text) < 500:
                 logger.error("❌ Cleaned text too short")
                 return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            boosted_text = self._boost_uniqueness(cleaned_text, topic_info)
+            # 🔥 Apply synonym variation for uniqueness
+            varied_text = self._apply_synonym_variation(cleaned_text)
+            
+            # Boost uniqueness further
+            boosted_text = self._boost_uniqueness(varied_text, topic_info)
+            
+            # Convert to HTML
             html_content = self._convert_to_html(boosted_text)
             
             word_count = len(boosted_text.split())
@@ -508,7 +627,7 @@ Article:"""
                 'summary': summary,
                 'word_count': word_count,
                 'is_ai_generated': True,
-                'generation_mode': 'ai_model_long_unique'
+                'generation_mode': 'ai_model_long_unique_v2'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
@@ -517,20 +636,33 @@ Article:"""
             return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """Boost content uniqueness"""
+        """Boost content uniqueness with varied sentence starters"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
+        # More diverse sentence starters
         starters = [
             'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
-            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to sources, '
+            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to analysts, ',
+            'Recent reports suggest that ', 'Data indicates that ', 'Experts observe that ',
+            'Meanwhile, ', 'Conversely, ', 'In contrast, ', 'As a result, ',
+            'Consequently, ', 'Nevertheless, ', 'On the other hand, '
         ]
+        
+        used_starters = set()
         
         for i, sent in enumerate(sentences):
             if i > 0 and i % 4 == 0 and sent.strip() and len(sent) > 20:
+                # Don't reuse starters
+                available_starters = [s for s in starters if s not in used_starters]
+                if not available_starters:
+                    used_starters.clear()
+                    available_starters = starters
+                
                 if not any(sent.strip().startswith(s) for s in starters):
-                    if random.random() > 0.7:
-                        starter = random.choice(starters)
+                    if random.random() > 0.6:
+                        starter = random.choice(available_starters)
+                        used_starters.add(starter)
                         sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
             varied_sentences.append(sent)
         
@@ -538,11 +670,12 @@ Article:"""
     
     def _clean_generated_text(self, text: str) -> str:
         """
-        🔧 IMPROVED: Clean AI-generated text and remove section headers
+        🔧 IMPROVED: Clean AI-generated text and remove all section markers
         """
         unwanted_phrases = [
             "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
-            "[This article", "This content was", "As an AI", "I cannot", "I apologize"
+            "[This article", "This content was", "As an AI", "I cannot", "I apologize",
+            "In conclusion,", "To summarize,", "In summary,"
         ]
         
         cleaned = text
@@ -555,39 +688,39 @@ Article:"""
                     cleaned = cleaned[:pos].strip()
                     break
         
-        # 🔧 REMOVE SECTION HEADERS (case-insensitive)
-        section_headers = [
-            r'^\s*Introduction:\s*',
-            r'^\s*Background & Context:\s*',
-            r'^\s*Background and Context:\s*',
-            r'^\s*Main Details:\s*',
-            r'^\s*Analysis & Impact:\s*',
-            r'^\s*Analysis and Impact:\s*',
-            r'^\s*Conclusion:\s*',
-            r'^\s*Summary:\s*',
-            r'\n\s*Introduction:\s*',
-            r'\n\s*Background & Context:\s*',
-            r'\n\s*Background and Context:\s*',
-            r'\n\s*Main Details:\s*',
-            r'\n\s*Analysis & Impact:\s*',
-            r'\n\s*Analysis and Impact:\s*',
-            r'\n\s*Conclusion:\s*',
+        # 🔥 REMOVE ALL SECTION HEADERS (comprehensive patterns)
+        section_patterns = [
+            # Explicit headers with colons
+            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary)\s*:\s*',
+            r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary)\s*:\s*',
+            # Headers with "and"
+            r'^\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
+            r'\n\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
+            # Headers with "&"
+            r'^\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
+            r'\n\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
         ]
         
-        for pattern in section_headers:
+        for pattern in section_patterns:
             cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
-        # 🔧 REMOVE REPEATED SENTENCE STARTERS
-        # Remove lines that start with "Industry experts note that" at beginning of paragraphs
-        cleaned = re.sub(r'^Industry experts note that\s+', '', cleaned, flags=re.IGNORECASE | re.MULTILINE)
-        cleaned = re.sub(r'\n\s*Industry experts note that\s+', '\n', cleaned, flags=re.IGNORECASE)
+        # 🔥 REMOVE REPETITIVE PHRASES
+        repetitive_phrases = [
+            r'^Industry experts note that\s+',
+            r'\n\s*Industry experts note that\s+',
+            r'^According to industry experts,\s+',
+            r'\n\s*According to industry experts,\s+',
+        ]
         
-        # Clean up extra whitespace
+        for pattern in repetitive_phrases:
+            cleaned = re.sub(pattern, '\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # Clean up formatting
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-        cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
         
-        logger.debug("🧹 Cleaned section headers and markers from text")
+        logger.debug("🧹 Cleaned section headers, markers, and repetitive phrases")
         
         return cleaned
     
@@ -652,17 +785,11 @@ Article:"""
     
     def _convert_to_html(self, text: str) -> str:
         """
-        🔧 IMPROVED: Convert text to HTML WITHOUT creating headers from section labels
+        🔧 Convert text to clean HTML paragraphs
         """
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
-        
-        # Section labels to skip (don't convert to headers)
-        section_labels = [
-            'introduction', 'background', 'context', 'main details', 
-            'analysis', 'impact', 'conclusion', 'summary'
-        ]
         
         for line in lines:
             line = line.strip()
@@ -673,23 +800,12 @@ Article:"""
                     current_paragraph = []
                 continue
             
-            # Check if line is a section label (skip it)
-            line_lower = line.lower().rstrip(':')
-            if any(label in line_lower for label in section_labels) and len(line) < 40:
-                continue  # Skip section labels
-            
-            # Convert markdown headers
+            # Only convert explicit markdown headers
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
                     current_paragraph = []
                 html_parts.append(f"<h2>{line.replace('##', '').strip()}</h2>")
-            # Don't convert short lines ending with ':' to headers anymore
-            elif line.isupper() and len(line) < 60 and len(line.split()) > 1:
-                if current_paragraph:
-                    html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
-                    current_paragraph = []
-                html_parts.append(f"<h2>{line.title()}</h2>")
             else:
                 current_paragraph.append(line)
         
