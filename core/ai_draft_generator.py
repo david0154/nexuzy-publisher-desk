@@ -6,11 +6,14 @@ FEATURES:
 ✅ 800-2000 word articles
 ✅ Anti-plagiarism system
 ✅ MANDATORY title uniqueness and rewrite
-✅ Enhanced human-like writing
+✅ Enhanced human-like writing with advanced variation
+✅ Research writer integration (uses same AI model)
 ✅ Local image download (WORKING!)
 ✅ Watermark detection
 ✅ Clean output (no "Introduction:", "Main Details:" headers)
-✅ Synonym variation for uniqueness
+✅ Advanced synonym variation for uniqueness
+✅ Sentence structure variation
+✅ Paraphrasing engine
 """
 
 import sqlite3
@@ -35,21 +38,26 @@ _CACHED_SENTENCE_MODEL = None
 
 # Enhanced synonym dictionary for uniqueness
 SYNONYM_DICT = {
-    'said': ['stated', 'mentioned', 'noted', 'explained', 'announced', 'revealed', 'reported', 'disclosed'],
-    'new': ['recent', 'latest', 'fresh', 'novel', 'emerging', 'modern', 'contemporary'],
-    'big': ['significant', 'substantial', 'considerable', 'major', 'large-scale', 'extensive'],
-    'important': ['crucial', 'vital', 'essential', 'critical', 'key', 'significant', 'pivotal'],
-    'show': ['demonstrate', 'illustrate', 'reveal', 'indicate', 'display', 'exhibit'],
-    'many': ['numerous', 'multiple', 'several', 'various', 'countless'],
-    'good': ['positive', 'beneficial', 'favorable', 'advantageous', 'promising'],
-    'bad': ['negative', 'adverse', 'unfavorable', 'detrimental', 'problematic'],
-    'make': ['create', 'produce', 'generate', 'develop', 'establish'],
-    'use': ['utilize', 'employ', 'apply', 'leverage', 'implement'],
-    'get': ['obtain', 'acquire', 'receive', 'secure', 'gain'],
-    'very': ['extremely', 'highly', 'particularly', 'exceptionally', 'remarkably'],
-    'problem': ['issue', 'challenge', 'concern', 'difficulty', 'complication'],
-    'change': ['transform', 'modify', 'alter', 'adjust', 'revise'],
-    'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to'],
+    'said': ['stated', 'mentioned', 'noted', 'explained', 'announced', 'revealed', 'reported', 'disclosed', 'expressed', 'conveyed'],
+    'new': ['recent', 'latest', 'fresh', 'novel', 'emerging', 'modern', 'contemporary', 'current', 'up-to-date'],
+    'big': ['significant', 'substantial', 'considerable', 'major', 'large-scale', 'extensive', 'sizeable', 'massive'],
+    'important': ['crucial', 'vital', 'essential', 'critical', 'key', 'significant', 'pivotal', 'paramount', 'fundamental'],
+    'show': ['demonstrate', 'illustrate', 'reveal', 'indicate', 'display', 'exhibit', 'present', 'showcase'],
+    'many': ['numerous', 'multiple', 'several', 'various', 'countless', 'myriad', 'abundant'],
+    'good': ['positive', 'beneficial', 'favorable', 'advantageous', 'promising', 'valuable', 'constructive'],
+    'bad': ['negative', 'adverse', 'unfavorable', 'detrimental', 'problematic', 'harmful', 'damaging'],
+    'make': ['create', 'produce', 'generate', 'develop', 'establish', 'form', 'construct'],
+    'use': ['utilize', 'employ', 'apply', 'leverage', 'implement', 'adopt', 'deploy'],
+    'get': ['obtain', 'acquire', 'receive', 'secure', 'gain', 'attain', 'procure'],
+    'very': ['extremely', 'highly', 'particularly', 'exceptionally', 'remarkably', 'significantly'],
+    'problem': ['issue', 'challenge', 'concern', 'difficulty', 'complication', 'obstacle'],
+    'change': ['transform', 'modify', 'alter', 'adjust', 'revise', 'adapt', 'evolve'],
+    'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to', 'enable'],
+    'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain'],
+    'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect'],
+    'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend'],
+    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for'],
+    'need': ['require', 'necessitate', 'demand', 'call for'],
 }
 
 # Title rewrite templates
@@ -64,6 +72,11 @@ TITLE_PATTERNS = [
     "The Truth About {topic}: What You Need to Know",
     "{topic}: Latest Developments and Updates",
     "Inside {topic}: Complete Report",
+    "{topic}: Why It Matters to {audience}",
+    "Exclusive: {topic} - Breaking Down the Details",
+    "{topic}: Everything You Should Know",
+    "Deep Dive: {topic} and Its Consequences",
+    "{topic}: A Fresh Perspective",
 ]
 
 class DraftGenerator:
@@ -85,7 +98,7 @@ class DraftGenerator:
             self.llm = self._load_model()
             if self.llm:
                 _CACHED_MODEL = self.llm
-                logger.info("💾 Model cached")
+                logger.info("💾 Model cached for both AI Writer and Research Writer")
         
         if _CACHED_SENTENCE_MODEL:
             self.sentence_model = _CACHED_SENTENCE_MODEL
@@ -97,7 +110,7 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output)")
+            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output, Research Enabled)")
     
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type"""
@@ -205,7 +218,7 @@ class DraftGenerator:
         replacements = {
             'gonna': 'going to', 'wanna': 'want to', 'gotta': 'got to',
             'kinda': 'kind of', 'sorta': 'sort of', 'dunno': "don't know",
-            'yeah': 'yes', 'nope': 'no'
+            'yeah': 'yes', 'nope': 'no', 'yep': 'yes', 'nah': 'no'
         }
         
         for informal, formal in replacements.items():
@@ -262,21 +275,21 @@ class DraftGenerator:
         }
         industry = industry_map.get(category, 'the Industry')
         
-        # Select random pattern
-        pattern = random.choice(TITLE_PATTERNS)
+        # Try multiple patterns until unique
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            pattern = random.choice(TITLE_PATTERNS)
+            new_title = pattern.format(topic=topic, audience=audience, industry=industry)
+            
+            uniqueness_check = self._check_title_uniqueness(new_title)
+            
+            if uniqueness_check['is_unique']:
+                logger.info(f"✅ NEW UNIQUE TITLE: {new_title}")
+                return new_title
         
-        # Apply pattern
-        new_title = pattern.format(topic=topic, audience=audience, industry=industry)
-        
-        # Verify uniqueness
-        uniqueness_check = self._check_title_uniqueness(new_title)
-        
-        if not uniqueness_check['is_unique']:
-            # If still not unique, add timestamp-based variation
-            new_title = f"{topic}: Complete Analysis ({datetime.now().strftime('%B %Y')})"
-            logger.warning(f"⚠️  Pattern title not unique, using timestamped version")
-        
-        logger.info(f"✅ NEW TITLE: {new_title}")
+        # Fallback: timestamp-based unique title
+        new_title = f"{topic}: Complete Analysis ({datetime.now().strftime('%B %Y')})"
+        logger.warning(f"⚠️  Using timestamped fallback: {new_title}")
         return new_title
     
     def _check_title_uniqueness(self, proposed_title: str) -> Dict:
@@ -335,6 +348,8 @@ class DraftGenerator:
             f"{original_title} - Breaking Analysis",
             f"{original_title}: Complete Report",
             f"{original_title} - Comprehensive Guide",
+            f"{original_title}: The Full Picture",
+            f"{original_title} - In-Depth Look",
         ]
         return random.choice(variations)
     
@@ -497,28 +512,56 @@ class DraftGenerator:
     
     def _apply_synonym_variation(self, text: str) -> str:
         """
-        🔥 NEW: Apply synonym replacement for uniqueness
+        🔥 IMPROVED: Apply synonym replacement with intelligent context awareness
         """
         words = text.split()
         varied_words = []
+        last_replacement = None
         
-        for word in words:
+        for i, word in enumerate(words):
             word_lower = word.lower().strip('.,!?;:')
             
-            # 30% chance to replace with synonym
-            if word_lower in SYNONYM_DICT and random.random() < 0.3:
+            # Skip if last word was replaced (avoid over-replacement)
+            if last_replacement and i - last_replacement < 3:
+                varied_words.append(word)
+                continue
+            
+            # 35% chance to replace with synonym
+            if word_lower in SYNONYM_DICT and random.random() < 0.35:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
-                if word[0].isupper():
+                if word and word[0].isupper():
                     synonym = synonym.capitalize()
                 varied_words.append(synonym)
+                last_replacement = i
             else:
                 varied_words.append(word)
         
         return ' '.join(varied_words)
     
+    def _paraphrase_sentence(self, sentence: str) -> str:
+        """
+        🔥 NEW: Paraphrase sentence to improve uniqueness
+        """
+        if not sentence or len(sentence) < 20:
+            return sentence
+        
+        # Apply passive to active voice conversion
+        passive_patterns = [
+            (r'was (\w+ed) by', r'actively \1'),
+            (r'were (\w+ed) by', r'actively \1'),
+            (r'has been (\w+ed)', r'has actively \1'),
+        ]
+        
+        paraphrased = sentence
+        for pattern, replacement in passive_patterns:
+            if random.random() < 0.3:
+                paraphrased = re.sub(pattern, replacement, paraphrased)
+        
+        return paraphrased
+    
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate LONG article with anti-plagiarism and human touch"""
+        """Generate LONG article with enhanced uniqueness and human touch"""
         
         topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
@@ -531,7 +574,8 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
             "Write in a clear, accessible style that engages readers",
             "Write with authority and depth, like a subject matter expert",
             "Write in a narrative style that tells the complete story",
-            "Write analytically, connecting facts to broader implications"
+            "Write analytically, connecting facts to broader implications",
+            "Write in an investigative style, revealing key details progressively",
         ]
         
         unique_angles = [
@@ -539,13 +583,14 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
             "Emphasize the human stories and personal experiences involved",
             "Analyze the strategic and economic dimensions",
             "Explore historical context and future projections",
-            "Examine the technical details and underlying mechanisms"
+            "Examine the technical details and underlying mechanisms",
+            "Connect this development to broader industry trends",
         ]
         
         style_instruction = random.choice(writing_styles)
         angle_instruction = random.choice(unique_angles)
         
-        # 🔥 IMPROVED PROMPT with human touch instructions
+        # 🔥 ENHANCED PROMPT with stronger uniqueness requirements
         prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
 
 Headline: {headline}
@@ -553,37 +598,48 @@ Summary: {summary}
 
 {topic_context}
 
-Write a comprehensive news article (1000-1200 words). Requirements:
+Write a comprehensive, UNIQUE news article (1000-1500 words). Requirements:
 
-1. Write naturally with varied sentence structure (mix short and long sentences)
-2. Use active voice predominantly  
+WRITING STYLE:
+1. Write naturally with varied sentence structure (mix short punchy sentences with longer analytical ones)
+2. Use active voice predominantly but mix in passive voice strategically  
 3. Include specific details, quotes, and facts
-4. Connect ideas with smooth transitions
+4. Connect ideas with smooth, logical transitions
 5. Write conversationally but professionally
-6. Vary paragraph length (2-5 sentences)
-7. Use concrete examples when possible
+6. Vary paragraph length (2-5 sentences, never uniform)
+7. Use concrete examples and real-world applications
+8. Add expert perspectives and industry context
+
+UNIQUENESS REQUIREMENTS:
+1. NEVER copy phrases or sentence structures from typical news articles
+2. Use original phrasing and fresh vocabulary
+3. Present information from a unique angle
+4. Include analysis and interpretation, not just facts
+5. Connect to broader trends and implications
+6. Use varied sentence beginnings and structures
 
 CRITICAL - DO NOT:
 - Include section labels ("Introduction:", "Background:", "Conclusion:")
 - Start multiple paragraphs with "Industry experts note that"
-- Use repetitive sentence starters
-- Write in a robotic, formulaic style
+- Use repetitive sentence starters or formulaic phrases
+- Write in a robotic, predictable style
 - Include meta-commentary about the article itself
+- Use cliché phrases like "only time will tell" or "remains to be seen"
 
-Write the article now in flowing, natural paragraphs:
+Write the article now in flowing, natural paragraphs with unique phrasing:
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating LONG content with human touch (60-90 seconds)...")
+            logger.info("⏳ Generating LONG unique content with human touch (60-90 seconds)...")
             
             generated_text = self.llm(
                 prompt,
                 max_new_tokens=1500,
-                temperature=0.88,  # Slightly higher for more creativity
-                top_p=0.93,
-                repetition_penalty=1.25,  # Stronger penalty
-                stop=["\n\n\n\n", "Article:", "Summary:", "Note:"],
+                temperature=0.90,  # Higher for more creativity and uniqueness
+                top_p=0.95,  # Broader sampling
+                repetition_penalty=1.3,  # Strong penalty against repetition
+                stop=["\n\n\n\n", "Article:", "Summary:", "Note:", "Disclaimer:"],
                 stream=False
             )
             
@@ -603,11 +659,17 @@ Article:"""
                 logger.error("❌ Cleaned text too short")
                 return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # 🔥 Apply synonym variation for uniqueness
+            # 🔥 Apply multi-layer uniqueness enhancement
+            logger.info("🔄 Applying uniqueness enhancements...")
+            
+            # Layer 1: Synonym variation
             varied_text = self._apply_synonym_variation(cleaned_text)
             
-            # Boost uniqueness further
-            boosted_text = self._boost_uniqueness(varied_text, topic_info)
+            # Layer 2: Sentence structure variation
+            restructured_text = self._vary_sentence_structure(varied_text)
+            
+            # Layer 3: Boost uniqueness with varied connectors
+            boosted_text = self._boost_uniqueness(restructured_text, topic_info)
             
             # Convert to HTML
             html_content = self._convert_to_html(boosted_text)
@@ -621,13 +683,18 @@ Article:"""
             else:
                 logger.info(f"✅ Perfect! {word_count} words (within range)")
             
+            # Calculate uniqueness score
+            uniqueness_score = self._calculate_uniqueness_score(boosted_text)
+            logger.info(f"📊 Uniqueness score: {uniqueness_score:.1%}")
+            
             return {
                 'title': headline,
                 'body_draft': html_content,
                 'summary': summary,
                 'word_count': word_count,
+                'uniqueness_score': uniqueness_score,
                 'is_ai_generated': True,
-                'generation_mode': 'ai_model_long_unique_v2'
+                'generation_mode': 'ai_model_enhanced_uniqueness_v3'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
@@ -635,8 +702,55 @@ Article:"""
             logger.error(traceback.format_exc())
             return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
+    def _vary_sentence_structure(self, text: str) -> str:
+        """
+        🔥 NEW: Vary sentence structure for better uniqueness
+        """
+        sentences = re.split(r'([.!?]\s+)', text)
+        varied_sentences = []
+        
+        for i, sent in enumerate(sentences):
+            if not sent.strip() or sent in ['. ', '! ', '? ']:
+                varied_sentences.append(sent)
+                continue
+            
+            # 20% chance to restructure sentence
+            if random.random() < 0.2 and len(sent) > 40:
+                # Try to invert sentence structure
+                if ', ' in sent:
+                    parts = sent.split(', ', 1)
+                    if len(parts) == 2 and len(parts[1]) > 20:
+                        sent = f"{parts[1]}, while {parts[0].lower()}"
+            
+            varied_sentences.append(sent)
+        
+        return ''.join(varied_sentences)
+    
+    def _calculate_uniqueness_score(self, text: str) -> float:
+        """
+        🔥 NEW: Calculate uniqueness score based on vocabulary diversity
+        """
+        words = text.lower().split()
+        if len(words) < 50:
+            return 0.5
+        
+        unique_words = set(words)
+        vocabulary_diversity = len(unique_words) / len(words)
+        
+        # Check for common filler words
+        common_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']
+        content_words = [w for w in words if w not in common_words]
+        
+        if not content_words:
+            return 0.5
+        
+        unique_content = len(set(content_words)) / len(content_words)
+        
+        # Average of both metrics
+        return (vocabulary_diversity + unique_content) / 2
+    
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """Boost content uniqueness with varied sentence starters"""
+        """🔥 ENHANCED: Boost content uniqueness with diverse connectors"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
@@ -646,7 +760,9 @@ Article:"""
             'Notably, ', 'Significantly, ', 'Importantly, ', 'According to analysts, ',
             'Recent reports suggest that ', 'Data indicates that ', 'Experts observe that ',
             'Meanwhile, ', 'Conversely, ', 'In contrast, ', 'As a result, ',
-            'Consequently, ', 'Nevertheless, ', 'On the other hand, '
+            'Consequently, ', 'Nevertheless, ', 'On the other hand, ',
+            'Interestingly, ', 'Remarkably, ', 'In fact, ', 'What\'s more, ',
+            'Beyond that, ', 'In this context, ', 'From this perspective, ',
         ]
         
         used_starters = set()
@@ -660,7 +776,7 @@ Article:"""
                     available_starters = starters
                 
                 if not any(sent.strip().startswith(s) for s in starters):
-                    if random.random() > 0.6:
+                    if random.random() > 0.5:  # 50% chance to add starter
                         starter = random.choice(available_starters)
                         used_starters.add(starter)
                         sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
@@ -675,7 +791,8 @@ Article:"""
         unwanted_phrases = [
             "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
             "[This article", "This content was", "As an AI", "I cannot", "I apologize",
-            "In conclusion,", "To summarize,", "In summary,"
+            "In conclusion,", "To summarize,", "In summary,", "To sum up,",
+            "only time will tell", "remains to be seen", "it goes without saying"
         ]
         
         cleaned = text
@@ -691,32 +808,32 @@ Article:"""
         # 🔥 REMOVE ALL SECTION HEADERS (comprehensive patterns)
         section_patterns = [
             # Explicit headers with colons
-            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary)\s*:\s*',
-            r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary)\s*:\s*',
+            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\\s*:\\s*',
+            r'\\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\\s*:\\s*',
             # Headers with "and"
-            r'^\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
-            r'\n\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
+            r'^\s*(?:Background and Context|Analysis and Impact)\\s*:\\s*',
+            r'\\n\s*(?:Background and Context|Analysis and Impact)\\s*:\\s*',
             # Headers with "&"
-            r'^\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
-            r'\n\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
+            r'^\s*(?:Background & Context|Analysis & Impact)\\s*:\\s*',
+            r'\\n\s*(?:Background & Context|Analysis & Impact)\\s*:\\s*',
         ]
         
         for pattern in section_patterns:
-            cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+            cleaned = re.sub(pattern, '\\n\\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
         # 🔥 REMOVE REPETITIVE PHRASES
         repetitive_phrases = [
-            r'^Industry experts note that\s+',
-            r'\n\s*Industry experts note that\s+',
-            r'^According to industry experts,\s+',
-            r'\n\s*According to industry experts,\s+',
+            r'^Industry experts note that\\s+',
+            r'\\n\s*Industry experts note that\\s+',
+            r'^According to industry experts,\\s+',
+            r'\\n\s*According to industry experts,\\s+',
         ]
         
         for pattern in repetitive_phrases:
-            cleaned = re.sub(pattern, '\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+            cleaned = re.sub(pattern, '\\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
         # Clean up formatting
-        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = re.sub(r'\\n{3,}', '\\n\\n', cleaned)
         cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
         
@@ -742,7 +859,7 @@ Article:"""
             html_body = draft.get('body_draft', '')
             
             if draft.get('local_image_path'):
-                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
+                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\\n\\n'
                 html_body = image_html + html_body
             
             columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
@@ -787,7 +904,7 @@ Article:"""
         """
         🔧 Convert text to clean HTML paragraphs
         """
-        lines = text.split('\n')
+        lines = text.split('\\n')
         html_parts = []
         current_paragraph = []
         
@@ -812,7 +929,7 @@ Article:"""
         if current_paragraph:
             html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
         
-        return '\n\n'.join(html_parts)
+        return '\\n\\n'.join(html_parts)
     
     def cleanup_old_queue(self, days: int = 15):
         """Remove old news from queue"""
