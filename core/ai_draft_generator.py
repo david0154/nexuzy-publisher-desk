@@ -186,14 +186,17 @@ class DraftGenerator:
                 # Also check category attribute
                 category = getattr(m, 'category', '')
                 
+                # Get rule ID safely
+                rule_id = getattr(m, 'ruleId', getattr(m, 'rule', ''))
+                
                 # Include only spelling/typo errors
                 if (issue_type in ['misspelling', 'typographical', 'typo'] or 
                     category in ['TYPOS', 'SPELLING'] or
-                    'MORFOLOGIK' in m.ruleId or 'SPELLING' in m.ruleId):
+                    'MORFOLOGIK' in str(rule_id) or 'SPELLING' in str(rule_id)):
                     # Exclude grammar rules that remove natural style
-                    if ('CONJUNCTION' not in m.ruleId and 
-                        'CONTRACTION' not in m.ruleId and
-                        'SENTENCE_WHITESPACE' not in m.ruleId):
+                    if ('CONJUNCTION' not in str(rule_id) and 
+                        'CONTRACTION' not in str(rule_id) and
+                        'SENTENCE_WHITESPACE' not in str(rule_id)):
                         important_matches.append(m)
             
             if important_matches:
@@ -682,7 +685,7 @@ class DraftGenerator:
             
             # 🔥 GRAMMAR AND SPELLING CHECK (keep natural style)
             corrected_body, grammar_errors = self._check_grammar_and_spelling(draft['body_draft'])
-            draft['body_draft'] = corrected_text
+            draft['body_draft'] = corrected_body
             draft['grammar_corrections'] = len(grammar_errors)
             
             draft['image_url'] = image_url or ''
