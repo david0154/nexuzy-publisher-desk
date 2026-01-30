@@ -4,16 +4,17 @@ Generates UNIQUE, comprehensive articles WITHOUT visible structure labels
 
 FEATURES:
 ✅ 800-2000 word articles
-✅ Anti-plagiarism system
+✅ Anti-plagiarism system with advanced variation
 ✅ MANDATORY title uniqueness and rewrite
-✅ Enhanced human-like writing with advanced variation
-✅ Research writer integration (uses same AI model)
+✅ Enhanced human-like writing with personality
+✅ Research writer integration (uses same AI model via GLOBAL CACHE)
 ✅ Local image download (WORKING!)
 ✅ Watermark detection
 ✅ Clean output (no "Introduction:", "Main Details:" headers)
-✅ Advanced synonym variation for uniqueness
-✅ Sentence structure variation
-✅ Paraphrasing engine
+✅ Multi-layer uniqueness engine
+✅ Advanced paraphrasing and synonym variation
+✅ Contextual sentence restructuring
+✅ Natural flow with varied transitions
 """
 
 import sqlite3
@@ -32,35 +33,47 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
-# GLOBAL MODEL CACHE
+# GLOBAL MODEL CACHE - shared between AI Writer and Research Writer
 _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
 
 # Enhanced synonym dictionary for uniqueness
 SYNONYM_DICT = {
-    'said': ['stated', 'mentioned', 'noted', 'explained', 'announced', 'revealed', 'reported', 'disclosed', 'expressed', 'conveyed'],
-    'new': ['recent', 'latest', 'fresh', 'novel', 'emerging', 'modern', 'contemporary', 'current', 'up-to-date'],
-    'big': ['significant', 'substantial', 'considerable', 'major', 'large-scale', 'extensive', 'sizeable', 'massive'],
-    'important': ['crucial', 'vital', 'essential', 'critical', 'key', 'significant', 'pivotal', 'paramount', 'fundamental'],
-    'show': ['demonstrate', 'illustrate', 'reveal', 'indicate', 'display', 'exhibit', 'present', 'showcase'],
-    'many': ['numerous', 'multiple', 'several', 'various', 'countless', 'myriad', 'abundant'],
-    'good': ['positive', 'beneficial', 'favorable', 'advantageous', 'promising', 'valuable', 'constructive'],
-    'bad': ['negative', 'adverse', 'unfavorable', 'detrimental', 'problematic', 'harmful', 'damaging'],
-    'make': ['create', 'produce', 'generate', 'develop', 'establish', 'form', 'construct'],
-    'use': ['utilize', 'employ', 'apply', 'leverage', 'implement', 'adopt', 'deploy'],
-    'get': ['obtain', 'acquire', 'receive', 'secure', 'gain', 'attain', 'procure'],
-    'very': ['extremely', 'highly', 'particularly', 'exceptionally', 'remarkably', 'significantly'],
-    'problem': ['issue', 'challenge', 'concern', 'difficulty', 'complication', 'obstacle'],
-    'change': ['transform', 'modify', 'alter', 'adjust', 'revise', 'adapt', 'evolve'],
-    'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to', 'enable'],
-    'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain'],
-    'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect'],
-    'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend'],
-    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for'],
-    'need': ['require', 'necessitate', 'demand', 'call for'],
+    'said': ['stated', 'mentioned', 'noted', 'explained', 'announced', 'revealed', 'reported', 'disclosed', 'expressed', 'conveyed', 'declared', 'affirmed', 'remarked'],
+    'new': ['recent', 'latest', 'fresh', 'novel', 'emerging', 'modern', 'contemporary', 'current', 'up-to-date', 'innovative', 'groundbreaking'],
+    'big': ['significant', 'substantial', 'considerable', 'major', 'large-scale', 'extensive', 'sizeable', 'massive', 'prominent', 'notable'],
+    'important': ['crucial', 'vital', 'essential', 'critical', 'key', 'significant', 'pivotal', 'paramount', 'fundamental', 'pressing', 'imperative'],
+    'show': ['demonstrate', 'illustrate', 'reveal', 'indicate', 'display', 'exhibit', 'present', 'showcase', 'reflect', 'manifest'],
+    'many': ['numerous', 'multiple', 'several', 'various', 'countless', 'myriad', 'abundant', 'plentiful', 'manifold'],
+    'good': ['positive', 'beneficial', 'favorable', 'advantageous', 'promising', 'valuable', 'constructive', 'productive', 'fruitful'],
+    'bad': ['negative', 'adverse', 'unfavorable', 'detrimental', 'problematic', 'harmful', 'damaging', 'troublesome', 'concerning'],
+    'make': ['create', 'produce', 'generate', 'develop', 'establish', 'form', 'construct', 'build', 'forge', 'craft'],
+    'use': ['utilize', 'employ', 'apply', 'leverage', 'implement', 'adopt', 'deploy', 'harness', 'incorporate'],
+    'get': ['obtain', 'acquire', 'receive', 'secure', 'gain', 'attain', 'procure', 'achieve', 'derive'],
+    'very': ['extremely', 'highly', 'particularly', 'exceptionally', 'remarkably', 'significantly', 'notably', 'especially'],
+    'problem': ['issue', 'challenge', 'concern', 'difficulty', 'complication', 'obstacle', 'hurdle', 'dilemma'],
+    'change': ['transform', 'modify', 'alter', 'adjust', 'revise', 'adapt', 'evolve', 'shift', 'reshape'],
+    'help': ['assist', 'aid', 'support', 'facilitate', 'contribute to', 'enable', 'empower', 'bolster'],
+    'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain', 'posit', 'contend'],
+    'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect', 'perceive', 'discern'],
+    'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend', 'grasp', 'appreciate'],
+    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearn for'],
+    'need': ['require', 'necessitate', 'demand', 'call for', 'warrant', 'entail'],
+    'look': ['appear', 'seem', 'indicate', 'suggest', 'signal', 'point to'],
+    'find': ['discover', 'uncover', 'identify', 'determine', 'ascertain', 'locate'],
+    'give': ['provide', 'offer', 'supply', 'deliver', 'furnish', 'grant', 'bestow'],
+    'tell': ['inform', 'notify', 'advise', 'communicate', 'convey', 'relay'],
+    'work': ['function', 'operate', 'perform', 'serve', 'act', 'execute'],
+    'call': ['designate', 'term', 'label', 'refer to', 'name', 'dub'],
+    'try': ['attempt', 'endeavor', 'strive', 'seek', 'aim', 'undertake'],
+    'ask': ['inquire', 'question', 'query', 'request', 'seek information'],
+    'feel': ['sense', 'experience', 'perceive', 'detect', 'recognize'],
+    'become': ['turn into', 'evolve into', 'transform into', 'develop into'],
+    'leave': ['depart', 'exit', 'withdraw', 'abandon', 'vacate'],
+    'put': ['place', 'position', 'set', 'situate', 'locate', 'install'],
 }
 
-# Title rewrite templates
+# Title rewrite templates with more variety
 TITLE_PATTERNS = [
     "{topic}: What This Means for {audience}",
     "Breaking: {topic} - Key Details Revealed",
@@ -77,6 +90,11 @@ TITLE_PATTERNS = [
     "{topic}: Everything You Should Know",
     "Deep Dive: {topic} and Its Consequences",
     "{topic}: A Fresh Perspective",
+    "{topic}: Exploring the Implications for {industry}",
+    "{topic}: Critical Insights and Analysis",
+    "{topic}: What Industry Leaders Are Saying",
+    "{topic}: The Complete Picture",
+    "{topic}: Behind the Headlines",
 ]
 
 class DraftGenerator:
@@ -90,15 +108,16 @@ class DraftGenerator:
         self.model_file = Path(model_name).name
         self.translation_keywords = self._load_translation_keywords()
         
+        # Use GLOBAL cached model (shared with Research Writer)
         if _CACHED_MODEL:
-            logger.info("✅ Using cached AI model")
+            logger.info("✅ Using GLOBAL cached AI model (shared with Research Writer)")
             self.llm = _CACHED_MODEL
         else:
-            logger.info("⏳ Loading AI model...")
+            logger.info("⏳ Loading AI model for BOTH AI Writer and Research Writer...")
             self.llm = self._load_model()
             if self.llm:
                 _CACHED_MODEL = self.llm
-                logger.info("💾 Model cached for both AI Writer and Research Writer")
+                logger.info("💾 Model cached GLOBALLY for AI Writer + Research Writer")
         
         if _CACHED_SENTENCE_MODEL:
             self.sentence_model = _CACHED_SENTENCE_MODEL
@@ -526,8 +545,8 @@ class DraftGenerator:
                 varied_words.append(word)
                 continue
             
-            # 35% chance to replace with synonym
-            if word_lower in SYNONYM_DICT and random.random() < 0.35:
+            # 40% chance to replace with synonym (increased from 35%)
+            if word_lower in SYNONYM_DICT and random.random() < 0.40:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
                 if word and word[0].isupper():
@@ -636,9 +655,9 @@ Article:"""
             generated_text = self.llm(
                 prompt,
                 max_new_tokens=1500,
-                temperature=0.90,  # Higher for more creativity and uniqueness
+                temperature=0.92,  # Increased for more creativity
                 top_p=0.95,  # Broader sampling
-                repetition_penalty=1.3,  # Strong penalty against repetition
+                repetition_penalty=1.35,  # Stronger penalty against repetition
                 stop=["\n\n\n\n", "Article:", "Summary:", "Note:", "Disclaimer:"],
                 stream=False
             )
@@ -660,7 +679,7 @@ Article:"""
                 return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
             # 🔥 Apply multi-layer uniqueness enhancement
-            logger.info("🔄 Applying uniqueness enhancements...")
+            logger.info("🔄 Applying multi-layer uniqueness enhancements...")
             
             # Layer 1: Synonym variation
             varied_text = self._apply_synonym_variation(cleaned_text)
@@ -671,10 +690,13 @@ Article:"""
             # Layer 3: Boost uniqueness with varied connectors
             boosted_text = self._boost_uniqueness(restructured_text, topic_info)
             
-            # Convert to HTML
-            html_content = self._convert_to_html(boosted_text)
+            # Layer 4: Advanced paraphrasing
+            final_text = self._advanced_paraphrase(boosted_text)
             
-            word_count = len(boosted_text.split())
+            # Convert to HTML
+            html_content = self._convert_to_html(final_text)
+            
+            word_count = len(final_text.split())
             
             if word_count < 800:
                 logger.warning(f"⚠️  Word count low: {word_count} (target: 800-2000)")
@@ -684,7 +706,7 @@ Article:"""
                 logger.info(f"✅ Perfect! {word_count} words (within range)")
             
             # Calculate uniqueness score
-            uniqueness_score = self._calculate_uniqueness_score(boosted_text)
+            uniqueness_score = self._calculate_uniqueness_score(final_text)
             logger.info(f"📊 Uniqueness score: {uniqueness_score:.1%}")
             
             return {
@@ -694,7 +716,7 @@ Article:"""
                 'word_count': word_count,
                 'uniqueness_score': uniqueness_score,
                 'is_ai_generated': True,
-                'generation_mode': 'ai_model_enhanced_uniqueness_v3'
+                'generation_mode': 'ai_model_enhanced_uniqueness_v4'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
@@ -704,7 +726,7 @@ Article:"""
     
     def _vary_sentence_structure(self, text: str) -> str:
         """
-        🔥 NEW: Vary sentence structure for better uniqueness
+        🔥 IMPROVED: Vary sentence structure for better uniqueness
         """
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
@@ -714,21 +736,56 @@ Article:"""
                 varied_sentences.append(sent)
                 continue
             
-            # 20% chance to restructure sentence
-            if random.random() < 0.2 and len(sent) > 40:
+            # 25% chance to restructure sentence (increased from 20%)
+            if random.random() < 0.25 and len(sent) > 40:
                 # Try to invert sentence structure
                 if ', ' in sent:
                     parts = sent.split(', ', 1)
                     if len(parts) == 2 and len(parts[1]) > 20:
-                        sent = f"{parts[1]}, while {parts[0].lower()}"
+                        # Avoid starting with lowercase
+                        if parts[1][0].islower():
+                            sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
+                        else:
+                            sent = f"{parts[1]}, while {parts[0].lower()}"
             
             varied_sentences.append(sent)
         
         return ''.join(varied_sentences)
     
+    def _advanced_paraphrase(self, text: str) -> str:
+        """
+        🔥 NEW: Advanced paraphrasing layer for maximum uniqueness
+        """
+        sentences = re.split(r'([.!?]\s+)', text)
+        paraphrased_sentences = []
+        
+        # Common phrase replacements for uniqueness
+        phrase_replacements = {
+            'in order to': 'to',
+            'due to the fact that': 'because',
+            'at this point in time': 'now',
+            'in the event that': 'if',
+            'for the purpose of': 'to',
+            'in spite of': 'despite',
+            'by means of': 'by',
+            'in the near future': 'soon',
+            'at the present time': 'currently',
+            'in the process of': 'while',
+        }
+        
+        for sent in sentences:
+            if sent.strip() and sent not in ['. ', '! ', '? ']:
+                for wordy, concise in phrase_replacements.items():
+                    if random.random() < 0.3:  # 30% chance to replace
+                        sent = sent.replace(wordy, concise)
+            
+            paraphrased_sentences.append(sent)
+        
+        return ''.join(paraphrased_sentences)
+    
     def _calculate_uniqueness_score(self, text: str) -> float:
         """
-        🔥 NEW: Calculate uniqueness score based on vocabulary diversity
+        🔥 IMPROVED: Calculate uniqueness score based on multiple factors
         """
         words = text.lower().split()
         if len(words) < 50:
@@ -746,8 +803,20 @@ Article:"""
         
         unique_content = len(set(content_words)) / len(content_words)
         
-        # Average of both metrics
-        return (vocabulary_diversity + unique_content) / 2
+        # Check sentence structure variety
+        sentences = re.split(r'[.!?]+', text)
+        sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+        
+        if len(sentence_lengths) > 1:
+            import statistics
+            length_variance = statistics.stdev(sentence_lengths) / statistics.mean(sentence_lengths) if statistics.mean(sentence_lengths) > 0 else 0
+        else:
+            length_variance = 0
+        
+        # Weighted average of metrics
+        uniqueness = (vocabulary_diversity * 0.4 + unique_content * 0.4 + min(length_variance, 1.0) * 0.2)
+        
+        return uniqueness
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
         """🔥 ENHANCED: Boost content uniqueness with diverse connectors"""
@@ -763,6 +832,8 @@ Article:"""
             'Consequently, ', 'Nevertheless, ', 'On the other hand, ',
             'Interestingly, ', 'Remarkably, ', 'In fact, ', 'What\'s more, ',
             'Beyond that, ', 'In this context, ', 'From this perspective, ',
+            'Looking at the broader picture, ', 'Taking into account recent developments, ',
+            'Given these circumstances, ', 'In light of these findings, ',
         ]
         
         used_starters = set()
@@ -775,8 +846,8 @@ Article:"""
                     used_starters.clear()
                     available_starters = starters
                 
-                if not any(sent.strip().startswith(s) for s in starters):
-                    if random.random() > 0.5:  # 50% chance to add starter
+                if not any(sent.strip().startswith(s.strip()) for s in starters):
+                    if random.random() > 0.4:  # 60% chance to add starter
                         starter = random.choice(available_starters)
                         used_starters.add(starter)
                         sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
@@ -808,32 +879,32 @@ Article:"""
         # 🔥 REMOVE ALL SECTION HEADERS (comprehensive patterns)
         section_patterns = [
             # Explicit headers with colons
-            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\\s*:\\s*',
-            r'\\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\\s*:\\s*',
+            r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
+            r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
             # Headers with "and"
-            r'^\s*(?:Background and Context|Analysis and Impact)\\s*:\\s*',
-            r'\\n\s*(?:Background and Context|Analysis and Impact)\\s*:\\s*',
+            r'^\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
+            r'\n\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
             # Headers with "&"
-            r'^\s*(?:Background & Context|Analysis & Impact)\\s*:\\s*',
-            r'\\n\s*(?:Background & Context|Analysis & Impact)\\s*:\\s*',
+            r'^\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
+            r'\n\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
         ]
         
         for pattern in section_patterns:
-            cleaned = re.sub(pattern, '\\n\\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+            cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
         # 🔥 REMOVE REPETITIVE PHRASES
         repetitive_phrases = [
-            r'^Industry experts note that\\s+',
-            r'\\n\s*Industry experts note that\\s+',
-            r'^According to industry experts,\\s+',
-            r'\\n\s*According to industry experts,\\s+',
+            r'^Industry experts note that\s+',
+            r'\n\s*Industry experts note that\s+',
+            r'^According to industry experts,\s+',
+            r'\n\s*According to industry experts,\s+',
         ]
         
         for pattern in repetitive_phrases:
-            cleaned = re.sub(pattern, '\\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+            cleaned = re.sub(pattern, '\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
         # Clean up formatting
-        cleaned = re.sub(r'\\n{3,}', '\\n\\n', cleaned)
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
         
@@ -859,7 +930,7 @@ Article:"""
             html_body = draft.get('body_draft', '')
             
             if draft.get('local_image_path'):
-                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\\n\\n'
+                image_html = f'<figure><img src="{draft["local_image_path"]}" alt="{draft.get("title", "")}" /></figure>\n\n'
                 html_body = image_html + html_body
             
             columns = ['workspace_id', 'news_id', 'title', 'body_draft', 'summary', 'word_count', 'image_url', 'source_url', 'generated_at']
@@ -904,7 +975,7 @@ Article:"""
         """
         🔧 Convert text to clean HTML paragraphs
         """
-        lines = text.split('\\n')
+        lines = text.split('\n')
         html_parts = []
         current_paragraph = []
         
@@ -929,7 +1000,7 @@ Article:"""
         if current_paragraph:
             html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
         
-        return '\\n\\n'.join(html_parts)
+        return '\n\n'.join(html_parts)
     
     def cleanup_old_queue(self, days: int = 15):
         """Remove old news from queue"""
