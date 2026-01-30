@@ -5,7 +5,7 @@ Generates articles that bypass AI detectors (under 5% AI detection)
 FEATURES:
 ✅ 450-2500 word flexible articles
 ✅ 95%+ human-like writing (under 5% AI detection)
-✅ Advanced humanization with contractions
+✅ ULTRA-AGGRESSIVE humanization with contractions
 ✅ Dramatic sentence length variation (burstiness)
 ✅ Natural conversational tone
 ✅ Unpredictable flow patterns
@@ -62,7 +62,7 @@ SYNONYM_DICT = {
     'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain', 'posit', 'contend'],
     'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect', 'perceive', 'discern'],
     'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend', 'grasp', 'appreciate'],
-    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearning for'],
+    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearn for'],
     'need': ['require', 'necessitate', 'demand', 'call for', 'warrant', 'entail'],
     'look': ['appear', 'seem', 'indicate', 'suggest', 'signal', 'point to'],
     'find': ['discover', 'uncover', 'identify', 'determine', 'ascertain', 'locate'],
@@ -76,6 +76,11 @@ SYNONYM_DICT = {
     'become': ['turn into', 'evolve into', 'transform into', 'develop into'],
     'leave': ['depart', 'exit', 'withdraw', 'abandon', 'vacate'],
     'put': ['place', 'position', 'set', 'situate', 'locate', 'install'],
+    'however': ['but', 'yet', 'still', 'though', 'although'],
+    'therefore': ['so', 'thus', 'hence', 'consequently'],
+    'additionally': ['also', 'plus', 'and', 'furthermore'],
+    'moreover': ['also', 'besides', 'what\'s more', 'on top of that'],
+    'furthermore': ['besides', 'also', 'plus', 'what\'s more'],
 }
 
 # Neutral title templates (avoiding sensationalism)
@@ -677,7 +682,7 @@ class DraftGenerator:
             
             # 🔥 GRAMMAR AND SPELLING CHECK (keep natural style)
             corrected_body, grammar_errors = self._check_grammar_and_spelling(draft['body_draft'])
-            draft['body_draft'] = corrected_body
+            draft['body_draft'] = corrected_text
             draft['grammar_corrections'] = len(grammar_errors)
             
             draft['image_url'] = image_url or ''
@@ -700,8 +705,8 @@ class DraftGenerator:
     
     def _humanize_text_advanced(self, text: str) -> str:
         """
-        🔥 ADVANCED: Make text 95%+ human-like to bypass AI detectors
-        Reduces AI detection score from 30%+ to under 5%
+        🔥 ULTRA-AGGRESSIVE HUMANIZATION: Make text 95%+ human-like
+        Reduces AI detection from 76% to under 20%
         """
         paragraphs = text.split('\n\n')
         humanized_paragraphs = []
@@ -715,8 +720,8 @@ class DraftGenerator:
                     humanized_sentences.append(sent)
                     continue
                 
-                # Add contractions (60% chance)
-                if random.random() < 0.6:
+                # 🔥 INCREASE: Add contractions (85% chance, was 60%)
+                if random.random() < 0.85:
                     contractions = {
                         ' do not ': " don't ", ' does not ': " doesn't ",
                         ' did not ': " didn't ", ' is not ': " isn't ",
@@ -738,25 +743,26 @@ class DraftGenerator:
                             # Replace case-insensitively
                             sent = re.sub(re.escape(full), contracted, sent, flags=re.IGNORECASE)
                 
-                # Add conversational starters (15% chance, once every ~7 sentences)
-                if i % 6 == 0 and random.random() < 0.15 and len(sent) > 30:
+                # 🔥 INCREASE: Add conversational starters (25% chance, was 15%)
+                if i % 4 == 0 and random.random() < 0.25 and len(sent) > 30:
                     conversational_starters = [
                         "Here's the thing: ", "To be fair, ", "Honestly, ",
                         "In reality, ", "The thing is, ", "That said, ",
                         "What's interesting is that ", "It turns out ",
                         "The reality is ", "At this point, ", "Truth be told, ",
                         "Let's be clear: ", "Here's what's happening: ",
-                        "In other words, ", "Simply put, "
+                        "In other words, ", "Simply put, ", "To be honest, ",
+                        "Basically, ", "Look, ", "Well, ", "Now, "
                     ]
                     starter = random.choice(conversational_starters)
                     if not any(sent.strip().startswith(cs.strip()) for cs in conversational_starters):
                         if sent.strip()[0].isupper():
                             sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
                 
-                # Occasionally start with And/But/Yet (10% chance)
-                if random.random() < 0.10 and i > 0 and len(sent) > 25:
+                # 🔥 INCREASE: Start with And/But/Yet (20% chance, was 10%)
+                if random.random() < 0.20 and i > 0 and len(sent) > 25:
                     if not sent.strip().startswith(('And', 'But', 'Yet', 'So', 'Still')):
-                        connectors = ['And ', 'But ', 'Yet ', 'So ']
+                        connectors = ['And ', 'But ', 'Yet ', 'So ', 'Still ', 'Plus, ']
                         if sent.strip()[0].isupper():
                             sent = random.choice(connectors) + sent.strip()[0].lower() + sent.strip()[1:]
                 
@@ -767,7 +773,7 @@ class DraftGenerator:
         return '\n\n'.join(humanized_paragraphs)
     
     def _vary_sentence_lengths_dramatically(self, text: str) -> str:
-        """Create dramatic variation in sentence lengths (human-like burstiness)"""
+        """🔥 ULTRA-AGGRESSIVE: Create EXTREME variation in sentence lengths"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied = []
         
@@ -779,12 +785,12 @@ class DraftGenerator:
                 i += 1
                 continue
             
-            # Every 4-5 sentences, combine two short ones OR keep as is
-            if i % 5 == 0 and i + 2 < len(sentences):
+            # 🔥 INCREASE: Every 3-4 sentences (was every 5), combine two short ones
+            if i % 3 == 0 and i + 2 < len(sentences):
                 next_sent = sentences[i + 2] if i + 2 < len(sentences) else None
-                if next_sent and len(sent.split()) < 12 and len(next_sent.split()) < 12:
+                if next_sent and len(sent.split()) < 15 and len(next_sent.split()) < 15:
                     # Combine two short sentences with varied connectors
-                    connectors = [', and ', ', but ', ', yet ', ', so ', ' - ', '; ']
+                    connectors = [', and ', ', but ', ', yet ', ', so ', ' - ', '; ', ', though ', ', while ']
                     connector = random.choice(connectors)
                     if next_sent.strip()[0].isupper():
                         combined = sent.strip() + connector + next_sent.strip()[0].lower() + next_sent.strip()[1:]
@@ -802,7 +808,7 @@ class DraftGenerator:
     
     def _apply_synonym_variation(self, text: str) -> str:
         """
-        🔥 IMPROVED: Apply synonym replacement with intelligent context awareness
+        🔥 ULTRA-AGGRESSIVE: Apply more synonym replacement
         """
         words = text.split()
         varied_words = []
@@ -812,12 +818,12 @@ class DraftGenerator:
             word_lower = word.lower().strip('.,!?;:')
             
             # Skip if last word was replaced (avoid over-replacement)
-            if last_replacement and i - last_replacement < 3:
+            if last_replacement and i - last_replacement < 2:  # Reduced from 3 to 2
                 varied_words.append(word)
                 continue
             
-            # 30% chance to replace with synonym (reduced for more natural feel)
-            if word_lower in SYNONYM_DICT and random.random() < 0.30:
+            # 🔥 INCREASE: 45% chance to replace with synonym (was 30%)
+            if word_lower in SYNONYM_DICT and random.random() < 0.45:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
                 if word and word[0].isupper():
@@ -931,19 +937,19 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                     retry_count += 1
                     continue
                 
-                # Apply humanization layers (KEY FOR AI DETECTION BYPASS)
-                logger.info("🔥 Applying advanced humanization layers...")
+                # 🔥 ULTRA-AGGRESSIVE HUMANIZATION LAYERS
+                logger.info("🔥 Applying ULTRA-AGGRESSIVE humanization layers...")
                 
-                # Layer 1: Synonym variation
+                # Layer 1: AGGRESSIVE Synonym variation (45% chance, was 30%)
                 varied_text = self._apply_synonym_variation(cleaned_text)
                 
                 # Layer 2: Sentence structure variation
                 restructured_text = self._vary_sentence_structure(varied_text)
                 
-                # Layer 3: ADVANCED HUMANIZATION (contractions, conversational phrases)
+                # Layer 3: ULTRA-AGGRESSIVE HUMANIZATION (85% contractions, 25% conversational)
                 humanized_text = self._humanize_text_advanced(restructured_text)
                 
-                # Layer 4: Dramatic sentence length variation (burstiness)
+                # Layer 4: EXTREME sentence length variation (every 3 sentences, was 5)
                 burst_text = self._vary_sentence_lengths_dramatically(humanized_text)
                 
                 # Layer 5: Boost uniqueness
@@ -958,7 +964,7 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 final_word_count = len(final_text.split())
                 uniqueness_score = self._calculate_uniqueness_score(final_text)
                 
-                logger.info(f"✅ HUMAN-LIKE article generated: {final_word_count} words, uniqueness: {uniqueness_score:.1%}")
+                logger.info(f"✅ ULTRA-HUMANIZED article: {final_word_count} words, uniqueness: {uniqueness_score:.1%}")
                 
                 return {
                     'title': headline,
@@ -967,7 +973,7 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                     'word_count': final_word_count,
                     'uniqueness_score': uniqueness_score,
                     'is_ai_generated': True,
-                    'generation_mode': 'human_like_v7_retry_logic',
+                    'generation_mode': 'ultra_humanized_v8_aggressive',
                     'retry_count': retry_count
                 }
                 
@@ -1035,8 +1041,8 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
                 varied_sentences.append(sent)
                 continue
             
-            # 20% chance to restructure
-            if random.random() < 0.20 and len(sent) > 40:
+            # 🔥 INCREASE: 30% chance to restructure (was 20%)
+            if random.random() < 0.30 and len(sent) > 40:
                 if ', ' in sent:
                     parts = sent.split(', ', 1)
                     if len(parts) == 2 and len(parts[1]) > 20:
@@ -1069,8 +1075,9 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         
         for sent in sentences:
             if sent.strip() and sent not in ['. ', '! ', '? ']:
+                # 🔥 INCREASE: 50% chance (was 30%)
                 for wordy, concise in phrase_replacements.items():
-                    if random.random() < 0.3:
+                    if random.random() < 0.50:
                         sent = sent.replace(wordy, concise)
             
             paraphrased_sentences.append(sent)
@@ -1123,15 +1130,17 @@ Write the full article now (MINIMUM 500 words, naturally like a human journalist
         
         used_starters = set()
         
+        # 🔥 INCREASE: Every 3 sentences (was every 4)
         for i, sent in enumerate(sentences):
-            if i > 0 and i % 4 == 0 and sent.strip() and len(sent) > 20:
+            if i > 0 and i % 3 == 0 and sent.strip() and len(sent) > 20:
                 available_starters = [s for s in starters if s not in used_starters]
                 if not available_starters:
                     used_starters.clear()
                     available_starters = starters
                 
                 if not any(sent.strip().startswith(s.strip()) for s in starters):
-                    if random.random() > 0.5:
+                    # 🔥 INCREASE: 60% chance (was 50%)
+                    if random.random() > 0.40:
                         starter = random.choice(available_starters)
                         used_starters.add(starter)
                         if sent.strip()[0].isupper():
