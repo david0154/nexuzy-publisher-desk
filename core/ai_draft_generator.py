@@ -748,7 +748,8 @@ class DraftGenerator:
             # 🔥 NEUTRAL TITLE REWRITE
             new_title = self._rewrite_title_neutral(headline, category, topic_info)
             
-            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.UPPER()} angle...")
+            # 🐛 FIXED: .upper() not .UPPER()
+            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.upper()} angle...")
             
             draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info, selected_angle, topic_nouns)
             
