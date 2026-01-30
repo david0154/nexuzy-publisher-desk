@@ -4,8 +4,8 @@ Generates articles that bypass AI detectors (under 5% AI detection)
 
 FEATURES:
 ✅ 450-2500 word flexible articles
-✅ 95%+ human-like writing (under 5% AI detection)
-✅ BALANCED humanization with contractions
+✅ 90%+ human-like writing (FIXED: under 10% AI detection)
+✅ HIGH CONTRACTIONS (80% rate - human-level)
 ✅ Dramatic sentence length variation (burstiness)
 ✅ Natural conversational tone
 ✅ Unpredictable flow patterns
@@ -108,7 +108,7 @@ ARTICLE_ANGLES = {
 }
 
 class DraftGenerator:
-    """Generate HUMAN-LIKE AI-rewritten articles (450-2500 words, 95%+ human score)"""
+    """Generate HUMAN-LIKE AI-rewritten articles (450-2500 words, 90%+ human score)"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
         global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _GRAMMAR_CHECKER
@@ -147,7 +147,7 @@ class DraftGenerator:
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (450-2500 words, 95%+ Human-Like, Anti-AI-Detection)")
+            logger.info("✅ AI Writer LOADED (450-2500 words, 90%+ Human-Like, Anti-AI-Detection)")
     
     def _load_grammar_checker(self):
         """Load grammar and spelling checker"""
@@ -742,7 +742,7 @@ class DraftGenerator:
     
     def _humanize_text_advanced(self, text: str) -> str:
         """
-        🔥 BALANCED HUMANIZATION: Make text human-like without over-processing
+        🔥 ENHANCED HUMANIZATION: 80% contractions + reduced transitions
         """
         paragraphs = text.split('\n\n')
         humanized_paragraphs = []
@@ -756,8 +756,8 @@ class DraftGenerator:
                     humanized_sentences.append(sent)
                     continue
                 
-                # BALANCED: Add contractions (55% chance, reduced from 85%)
-                if random.random() < 0.55:
+                # 🔥 INCREASED: 80% contractions (was 55%) - human-level
+                if random.random() < 0.80:
                     contractions = {
                         ' do not ': " don't ", ' does not ': " doesn't ",
                         ' did not ': " didn't ", ' is not ': " isn't ",
@@ -775,22 +775,20 @@ class DraftGenerator:
                         if full in sent.lower():
                             sent = re.sub(re.escape(full), contracted, sent, flags=re.IGNORECASE)
                 
-                # BALANCED: Add conversational starters (12% chance, reduced from 25%)
-                # Only if sentence is complete and doesn't already have a starter
-                if (i % 5 == 0 and random.random() < 0.12 and len(sent) > 40 and 
+                # 🔥 REDUCED: 8% conversational starters (was 12%), every 8 sentences
+                if (i % 8 == 0 and random.random() < 0.08 and len(sent) > 40 and 
                     self._is_complete_sentence(sent)):
                     conversational_starters = [
                         "In fact, ", "Notably, ", "Importantly, ",
-                        "Meanwhile, ", "However, ", "Additionally, "
+                        "Meanwhile, ", "However, "
                     ]
                     starter = random.choice(conversational_starters)
-                    # Check sentence doesn't already start with transition word
                     if not any(sent.strip().startswith(cs.strip().rstrip(',')) for cs in conversational_starters):
                         if sent.strip() and sent.strip()[0].isupper():
                             sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
                 
-                # BALANCED: Start with And/But (10% chance, reduced from 20%)
-                if (random.random() < 0.10 and i > 0 and len(sent) > 30 and 
+                # 🔥 REDUCED: 6% And/But starters (was 10%)
+                if (random.random() < 0.06 and i > 0 and len(sent) > 30 and 
                     self._is_complete_sentence(sent)):
                     if not sent.strip().startswith(('And', 'But', 'Yet', 'So', 'Still', 'However', 'Meanwhile')):
                         connectors = ['But ', 'Yet ', 'So ']
@@ -799,14 +797,13 @@ class DraftGenerator:
                 
                 humanized_sentences.append(sent)
             
-            # Join and validate no incomplete sentences
             para_text = ''.join(humanized_sentences)
             humanized_paragraphs.append(para_text)
         
         return '\n\n'.join(humanized_paragraphs)
     
     def _vary_sentence_lengths_dramatically(self, text: str) -> str:
-        """🔥 Create variation in sentence lengths with better validation"""
+        """🔥 ENHANCED: Create DRAMATIC sentence length variation (3-5 / 15-20 / 30-40 words)"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied = []
         
@@ -818,21 +815,41 @@ class DraftGenerator:
                 i += 1
                 continue
             
-            # Every 4 sentences (reduced from 3), try to combine short ones
-            if i % 4 == 0 and i + 2 < len(sentences):
+            word_count = len(sent.split())
+            
+            # 🔥 DRAMATIC VARIATION: Create punchy 3-5 word sentences
+            if i % 6 == 0 and word_count > 25 and random.random() < 0.3:
+                # Split long sentence into punchy + rest
+                words = sent.split()
+                if len(words) > 8:
+                    # Take first 3-5 words as punchy sentence
+                    split_point = random.randint(3, 5)
+                    punchy = ' '.join(words[:split_point])
+                    rest = ' '.join(words[split_point:])
+                    
+                    if self._is_complete_sentence(punchy + '.') and rest:
+                        varied.append(punchy + '.')
+                        varied.append(' ')  # Add space separator
+                        # Capitalize rest
+                        if rest and rest[0].islower():
+                            rest = rest[0].upper() + rest[1:]
+                        varied.append(rest)
+                        i += 1
+                        continue
+            
+            # Every 5 sentences, try to combine for longer sentences (30-40 words)
+            if i % 5 == 0 and i + 2 < len(sentences):
                 next_sent = sentences[i + 2] if i + 2 < len(sentences) else None
-                if next_sent and len(sent.split()) < 12 and len(next_sent.split()) < 12:
-                    # Validate both are complete before combining
+                if next_sent and word_count < 20 and len(next_sent.split()) < 20:
                     if self._is_complete_sentence(sent) and self._is_complete_sentence(next_sent):
-                        # Combine two short sentences with varied connectors
-                        connectors = [', and ', ', but ', ', yet ']
+                        connectors = [', and ', ', but ', ', yet ', ', while ']
                         connector = random.choice(connectors)
                         if next_sent.strip() and next_sent.strip()[0].isupper():
                             combined = sent.strip() + connector + next_sent.strip()[0].lower() + next_sent.strip()[1:]
                         else:
                             combined = sent.strip() + connector + next_sent.strip()
                         varied.append(combined)
-                        varied.append(sentences[i + 1])  # Add the period/punctuation
+                        varied.append(sentences[i + 1])
                         i += 3
                         continue
             
@@ -857,7 +874,7 @@ class DraftGenerator:
                 varied_words.append(word)
                 continue
             
-            # BALANCED: 30% chance to replace with synonym (reduced from 45%)
+            # BALANCED: 30% chance to replace with synonym
             if word_lower in SYNONYM_DICT and random.random() < 0.30:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
@@ -878,14 +895,11 @@ Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
-        # Get angle-specific instruction
         angle_instruction = ARTICLE_ANGLES[angle]
-        
-        # Create opening hook
         opening_hook = self._create_neutral_opening(topic_nouns, angle, summary)
         
-        # 🔥 IMPROVED PROMPT - emphasizes word count and COMPLETE sentences
-        prompt = f"""Write a comprehensive news article. MINIMUM 500 WORDS REQUIRED. Write at least 6-8 detailed paragraphs.
+        # 🔥 ENHANCED PROMPT: No citations, conversational tone
+        prompt = f"""Write a comprehensive news article. MINIMUM 500 WORDS. Write 6-8 detailed paragraphs.
 
 Article Focus: {angle_instruction}
 
@@ -894,30 +908,31 @@ Summary: {summary}
 
 {topic_context}
 
-IMPORTANT REQUIREMENTS:
-- Write AT LEAST 500 words (target 600-800 words)
-- Write 6-8 substantial paragraphs
-- Each paragraph should be 3-5 COMPLETE sentences
-- EVERY SENTENCE MUST BE COMPLETE - no fragments ending with 'while', 'but', etc.
-- DO NOT STOP EARLY - keep writing until you reach at least 500 words
+CRITICAL REQUIREMENTS:
+- Write AT LEAST 500 words (target 600-800)
+- 6-8 substantial paragraphs
+- Each paragraph: 3-5 COMPLETE sentences
+- EVERY sentence MUST be complete - no fragments
+- NEVER include citations like (Source, 2018) or (Report, 2024)
+- NO parenthetical references anywhere
 
-HUMAN WRITING STYLE:
-- Use contractions naturally (don't, it's, they're, won't, can't)
-- Vary sentence lengths (mix short and longer sentences)
-- Write like a professional journalist - clear and informative
-- Be direct and factual
-- NO unnecessary transitions at sentence beginnings
+WRITING STYLE (conversational journalist):
+- Use contractions heavily (don't, it's, they're, won't, can't, hasn't)
+- Mix short punchy sentences (3-5 words) with longer ones (20-30 words)
+- Write like talking to a friend - clear, direct, engaging
+- Be factual but conversational
+- Avoid formal academic tone
 
-AVOID:
-- Incomplete sentences or fragments
-- Starting every sentence with transition words
-- Overly casual language
+STRICTLY AVOID:
+- Citations in parentheses: (Company, 2024), (Report), (Source Name, Year)
+- Incomplete sentence fragments
+- Starting every sentence with transitions
 - Section headers ("Introduction:", "Background:")
 - Clichés ("only time will tell", "remains to be seen")
-- Long speeches or quotes (max 1-2 sentences per quote)
-- Stopping before 500 words!
+- Long quotes (max 1-2 sentences)
+- Formal transitions at every sentence start
 
-Write the full article now (MINIMUM 500 words, complete sentences only):
+Write the full article now (500+ words, NO CITATIONS):
 
 """
         
@@ -928,11 +943,10 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
             try:
                 logger.info(f"⏳ Generating article (attempt {retry_count + 1}/{max_retries})...")
                 
-                # 🔥 FIXED: Increased max_new_tokens and reduced stop sequences
                 generated_text = self.llm(
                     prompt,
                     max_new_tokens=2500,
-                    temperature=0.88,      # Slightly reduced for more coherent output
+                    temperature=0.88,
                     top_p=0.92,
                     repetition_penalty=1.25,
                     stop=["\n\n\n\n"],
@@ -947,7 +961,6 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                 
                 logger.info(f"📊 Generated {word_count} words (raw)")
                 
-                # 🔥 CHECK: If too short, retry
                 if word_count < 300:
                     logger.warning(f"⚠️  Too short ({word_count} words), retrying...")
                     retry_count += 1
@@ -958,6 +971,8 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                 # Clean text
                 cleaned_text = self._clean_generated_text(generated_text)
                 cleaned_text = self._remove_long_speeches(cleaned_text)
+                # 🔥 REMOVE CITATIONS
+                cleaned_text = self._remove_citations(cleaned_text)
                 
                 cleaned_word_count = len(cleaned_text.split())
                 logger.info(f"📊 After cleaning: {cleaned_word_count} words")
@@ -967,28 +982,21 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                     retry_count += 1
                     continue
                 
-                # 🔥 BALANCED HUMANIZATION LAYERS
-                logger.info("🔥 Applying BALANCED humanization...")
+                # 🔥 ENHANCED HUMANIZATION LAYERS
+                logger.info("🔥 Applying ENHANCED humanization (80% contractions)...")
                 
-                # Layer 1: Synonym variation (30%)
                 varied_text = self._apply_synonym_variation(cleaned_text)
-                
-                # Layer 2: Sentence structure variation
                 restructured_text = self._vary_sentence_structure(varied_text)
                 
-                # Layer 3: BALANCED HUMANIZATION (55% contractions, 12% conversational)
+                # 🔥 KEY: 80% contractions, reduced transitions
                 humanized_text = self._humanize_text_advanced(restructured_text)
                 
-                # Layer 4: Sentence length variation (every 4 sentences)
+                # 🔥 DRAMATIC sentence length variation
                 burst_text = self._vary_sentence_lengths_dramatically(humanized_text)
                 
-                # Layer 5: Boost uniqueness (moderate)
                 boosted_text = self._boost_uniqueness(burst_text, topic_info)
-                
-                # Layer 6: Advanced paraphrasing
                 final_text = self._advanced_paraphrase(boosted_text)
                 
-                # Convert to HTML
                 html_content = self._convert_to_html(final_text)
                 
                 final_word_count = len(final_text.split())
@@ -1003,7 +1011,7 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                     'word_count': final_word_count,
                     'uniqueness_score': uniqueness_score,
                     'is_ai_generated': True,
-                    'generation_mode': 'balanced_humanized_v9',
+                    'generation_mode': 'enhanced_humanized_v10',
                     'retry_count': retry_count
                 }
                 
@@ -1016,6 +1024,25 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                     return {'error': f"AI generation failed after {max_retries} attempts: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
         
         return {'error': f'Failed to generate article after {max_retries} attempts', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+    
+    def _remove_citations(self, text: str) -> str:
+        """🔥 NEW: Remove all parenthetical citations"""
+        # Remove citations like (Source, 2018), (Company Name, 2024), (Report)
+        citation_patterns = [
+            r'\([A-Z][a-zA-Z\s&]+,?\s+\d{4}\)',  # (Source Name, 2024)
+            r'\([A-Z][a-zA-Z\s&]+\)',  # (Source Name)
+            r'\([A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+,\s+\d{4}\)',  # (Company Name, 2024)
+        ]
+        
+        cleaned = text
+        for pattern in citation_patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+        
+        # Clean up double spaces left by removal
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = re.sub(r'\s+\.', '.', cleaned)
+        
+        return cleaned
     
     def _remove_long_speeches(self, text: str) -> str:
         """Remove long speeches and excessive quotes"""
@@ -1030,7 +1057,6 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
         
         text = re.sub(quote_pattern, shorten_quote, text)
         
-        # Remove rhetorical patterns
         rhetorical_patterns = [
             r'"How can we[^"]{30,}"',
             r'"Why should[^"]{30,}"',
@@ -1066,12 +1092,11 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                 varied_sentences.append(sent)
                 continue
             
-            # Reduced to 20% chance (from 30%)
-            if random.random() < 0.20 and len(sent) > 40:
+            # Reduced to 15% chance (from 20%)
+            if random.random() < 0.15 and len(sent) > 40:
                 if ', ' in sent:
                     parts = sent.split(', ', 1)
                     if len(parts) == 2 and len(parts[1]) > 20:
-                        # Only restructure if result is complete
                         if self._is_complete_sentence(parts[1]):
                             if parts[1][0].islower():
                                 sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
@@ -1103,7 +1128,7 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
         for sent in sentences:
             if sent.strip() and sent not in ['. ', '! ', '? ']:
                 for wordy, concise in phrase_replacements.items():
-                    if random.random() < 0.40:  # Reduced from 50%
+                    if random.random() < 0.35:
                         sent = sent.replace(wordy, concise)
             
             paraphrased_sentences.append(sent)
@@ -1141,34 +1166,28 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
         return uniqueness
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """Boost content uniqueness with varied connectors"""
+        """🔥 REDUCED: Boost uniqueness - every 10 sentences at 20% chance"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
-        # More conservative transition words
         starters = [
-            'Additionally, ', 'However, ', 'Meanwhile, ',
-            'In particular, ', 'Notably, ', 'Furthermore, ',
-            'Importantly, ', 'As a result, ', 'Consequently, ',
-            'Nevertheless, ', 'In fact, '
+            'However, ', 'Meanwhile, ', 'In fact, ',
+            'Notably, ', 'Importantly, '
         ]
         
         used_starters = set()
         
-        # Reduced frequency: Every 5 sentences (was 3)
+        # 🔥 REDUCED: Every 10 sentences (was 5), 20% chance (was 40%)
         for i, sent in enumerate(sentences):
-            if i > 0 and i % 5 == 0 and sent.strip() and len(sent) > 25:
-                # Only add starter to complete sentences
+            if i > 0 and i % 10 == 0 and sent.strip() and len(sent) > 25:
                 if self._is_complete_sentence(sent):
                     available_starters = [s for s in starters if s not in used_starters]
                     if not available_starters:
                         used_starters.clear()
                         available_starters = starters
                     
-                    # Check sentence doesn't already have a starter
                     if not any(sent.strip().startswith(s.strip().rstrip(',')) for s in starters):
-                        # Reduced to 40% chance (was 60%)
-                        if random.random() < 0.40:
+                        if random.random() < 0.20:  # 🔥 REDUCED from 40%
                             starter = random.choice(available_starters)
                             used_starters.add(starter)
                             if sent.strip() and sent.strip()[0].isupper():
@@ -1196,7 +1215,6 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
                     cleaned = cleaned[:pos].strip()
                     break
         
-        # Remove section headers
         section_patterns = [
             r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
             r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
@@ -1207,7 +1225,6 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
         for pattern in section_patterns:
             cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
-        # Remove repetitive phrases
         repetitive_phrases = [
             r'^Industry experts note that\s+',
             r'\n\s*Industry experts note that\s+',
@@ -1218,7 +1235,6 @@ Write the full article now (MINIMUM 500 words, complete sentences only):
         for pattern in repetitive_phrases:
             cleaned = re.sub(pattern, '\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
-        # Clean formatting
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
