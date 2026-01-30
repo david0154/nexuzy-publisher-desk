@@ -18,6 +18,7 @@ FEATURES:
 ✅ Research writer integration
 ✅ Local image download with watermark detection
 ✅ Clean output (no section headers)
+✅ Retry logic for short articles
 """
 
 import sqlite3
@@ -61,7 +62,7 @@ SYNONYM_DICT = {
     'think': ['believe', 'consider', 'suggest', 'indicate', 'propose', 'maintain', 'posit', 'contend'],
     'see': ['observe', 'notice', 'witness', 'recognize', 'identify', 'detect', 'perceive', 'discern'],
     'know': ['understand', 'recognize', 'acknowledge', 'realize', 'comprehend', 'grasp', 'appreciate'],
-    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearn for'],
+    'want': ['desire', 'seek', 'aim for', 'pursue', 'strive for', 'aspire to', 'yearning for'],
     'need': ['require', 'necessitate', 'demand', 'call for', 'warrant', 'entail'],
     'look': ['appear', 'seem', 'indicate', 'suggest', 'signal', 'point to'],
     'find': ['discover', 'uncover', 'identify', 'determine', 'ascertain', 'locate'],
@@ -358,11 +359,12 @@ class DraftGenerator:
             logger.info(f"🔍 Model type: {model_type}")
             logger.info("⏳ Loading for flexible articles (450-2500 words)...")
             
+            # 🔥 FIXED: Increased context_length and max_new_tokens
             llm = AutoModelForCausalLM.from_pretrained(
                 str(model_path),
                 model_type=model_type,
-                context_length=2048,
-                max_new_tokens=1500,
+                context_length=4096,  # Increased from 2048
+                max_new_tokens=2500,  # Increased from 1500
                 threads=4,
                 gpu_layers=0
             )
@@ -828,7 +830,7 @@ class DraftGenerator:
         return ' '.join(varied_words)
     
     def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict, angle: str, topic_nouns: List[str]) -> Dict:
-        """Generate article with human-like natural writing"""
+        """Generate article with human-like natural writing + RETRY LOGIC"""
         
         topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
@@ -841,8 +843,8 @@ Statistics: {', '.join(topic_info['numbers'][:3])}"""
         # Create opening hook
         opening_hook = self._create_neutral_opening(topic_nouns, angle, summary)
         
-        # 🔥 HUMAN-LIKE PROMPT (conversational, natural)
-        prompt = f"""Write a news article as if you're a human journalist. Use natural, conversational language.
+        # 🔥 IMPROVED PROMPT - emphasizes word count
+        prompt = f"""Write a comprehensive news article. MINIMUM 500 WORDS REQUIRED. Write at least 6-8 detailed paragraphs.
 
 Article Focus: {angle_instruction}
 
@@ -851,7 +853,11 @@ Summary: {summary}
 
 {topic_context}
 
-Write 450-2500 words. Write naturally, like a human:
+IMPORTANT REQUIREMENTS:
+- Write AT LEAST 500 words (target 600-800 words)
+- Write 6-8 substantial paragraphs
+- Each paragraph should be 3-5 sentences
+- DO NOT STOP EARLY - keep writing until you reach at least 500 words
 
 HUMAN WRITING STYLE:
 - Use contractions naturally (don't, it's, they're, won't, can't)
@@ -870,86 +876,111 @@ AVOID:
 - Section headers ("Introduction:", "Background:")
 - Clichés ("only time will tell", "remains to be seen")
 - Long speeches or quotes (max 1-2 sentences per quote, 2-3 quotes total)
+- Stopping before 500 words!
 
-Write the article now (naturally, like a human journalist):
+Write the full article now (MINIMUM 500 words, naturally like a human journalist):
 
 """
         
-        try:
-            logger.info("⏳ Generating human-like article...")
-            
-            generated_text = self.llm(
-                prompt,
-                max_new_tokens=1500,
-                temperature=0.90,  # Higher for more natural variation
-                top_p=0.94,        # Higher for more creativity
-                repetition_penalty=1.30,  # Lower to allow natural repetition
-                stop=["\n\n\n\n", "Article:", "Summary:", "Note:", "Disclaimer:"],
-                stream=False
-            )
-            
-            if not generated_text or not isinstance(generated_text, str):
-                generated_text = str(generated_text) if generated_text else ""
-            
-            generated_text = generated_text.strip()
-            
-            if len(generated_text) < 300:
-                logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
-                return {'error': f'AI generated only {len(generated_text)} chars. Need 450+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
-            
-            # Clean text
-            cleaned_text = self._clean_generated_text(generated_text)
-            
-            # Remove long speeches and excessive quotes
-            cleaned_text = self._remove_long_speeches(cleaned_text)
-            
-            if len(cleaned_text) < 300:
-                logger.error("❌ Cleaned text too short")
-                return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
-            
-            # Apply humanization layers (KEY FOR AI DETECTION BYPASS)
-            logger.info("🔥 Applying advanced humanization layers...")
-            
-            # Layer 1: Synonym variation
-            varied_text = self._apply_synonym_variation(cleaned_text)
-            
-            # Layer 2: Sentence structure variation
-            restructured_text = self._vary_sentence_structure(varied_text)
-            
-            # Layer 3: ADVANCED HUMANIZATION (contractions, conversational phrases)
-            humanized_text = self._humanize_text_advanced(restructured_text)
-            
-            # Layer 4: Dramatic sentence length variation (burstiness)
-            burst_text = self._vary_sentence_lengths_dramatically(humanized_text)
-            
-            # Layer 5: Boost uniqueness
-            boosted_text = self._boost_uniqueness(burst_text, topic_info)
-            
-            # Layer 6: Advanced paraphrasing
-            final_text = self._advanced_paraphrase(boosted_text)
-            
-            # Convert to HTML
-            html_content = self._convert_to_html(final_text)
-            
-            word_count = len(final_text.split())
-            uniqueness_score = self._calculate_uniqueness_score(final_text)
-            
-            logger.info(f"✅ HUMAN-LIKE article generated: {word_count} words, uniqueness: {uniqueness_score:.1%}")
-            
-            return {
-                'title': headline,
-                'body_draft': html_content,
-                'summary': summary,
-                'word_count': word_count,
-                'uniqueness_score': uniqueness_score,
-                'is_ai_generated': True,
-                'generation_mode': 'human_like_v6_anti_ai_detection'
-            }
-        except Exception as e:
-            logger.error(f"❌ Model generation error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                logger.info(f"⏳ Generating article (attempt {retry_count + 1}/{max_retries})...")
+                
+                # 🔥 FIXED: Increased max_new_tokens and reduced stop sequences
+                generated_text = self.llm(
+                    prompt,
+                    max_new_tokens=2500,  # Increased from 1500
+                    temperature=0.92,      # Slightly higher for more variation
+                    top_p=0.95,            # Higher for more creativity
+                    repetition_penalty=1.25,  # Balanced for natural repetition
+                    stop=["\n\n\n\n"],  # Only stop on 4 newlines (removed aggressive stops)
+                    stream=False
+                )
+                
+                if not generated_text or not isinstance(generated_text, str):
+                    generated_text = str(generated_text) if generated_text else ""
+                
+                generated_text = generated_text.strip()
+                word_count = len(generated_text.split())
+                
+                logger.info(f"📊 Generated {word_count} words (raw)")
+                
+                # 🔥 CHECK: If too short, retry with more aggressive prompt
+                if word_count < 300:
+                    logger.warning(f"⚠️  Too short ({word_count} words), retrying...")
+                    retry_count += 1
+                    # Make prompt more aggressive
+                    prompt = prompt.replace("MINIMUM 500 WORDS", f"CRITICAL: WRITE AT LEAST 600 WORDS")
+                    prompt = prompt.replace("6-8 paragraphs", "8-10 paragraphs")
+                    continue
+                
+                # Clean text
+                cleaned_text = self._clean_generated_text(generated_text)
+                
+                # Remove long speeches and excessive quotes
+                cleaned_text = self._remove_long_speeches(cleaned_text)
+                
+                cleaned_word_count = len(cleaned_text.split())
+                logger.info(f"📊 After cleaning: {cleaned_word_count} words")
+                
+                if cleaned_word_count < 200:
+                    logger.error(f"❌ Too short after cleaning ({cleaned_word_count} words), retrying...")
+                    retry_count += 1
+                    continue
+                
+                # Apply humanization layers (KEY FOR AI DETECTION BYPASS)
+                logger.info("🔥 Applying advanced humanization layers...")
+                
+                # Layer 1: Synonym variation
+                varied_text = self._apply_synonym_variation(cleaned_text)
+                
+                # Layer 2: Sentence structure variation
+                restructured_text = self._vary_sentence_structure(varied_text)
+                
+                # Layer 3: ADVANCED HUMANIZATION (contractions, conversational phrases)
+                humanized_text = self._humanize_text_advanced(restructured_text)
+                
+                # Layer 4: Dramatic sentence length variation (burstiness)
+                burst_text = self._vary_sentence_lengths_dramatically(humanized_text)
+                
+                # Layer 5: Boost uniqueness
+                boosted_text = self._boost_uniqueness(burst_text, topic_info)
+                
+                # Layer 6: Advanced paraphrasing
+                final_text = self._advanced_paraphrase(boosted_text)
+                
+                # Convert to HTML
+                html_content = self._convert_to_html(final_text)
+                
+                final_word_count = len(final_text.split())
+                uniqueness_score = self._calculate_uniqueness_score(final_text)
+                
+                logger.info(f"✅ HUMAN-LIKE article generated: {final_word_count} words, uniqueness: {uniqueness_score:.1%}")
+                
+                return {
+                    'title': headline,
+                    'body_draft': html_content,
+                    'summary': summary,
+                    'word_count': final_word_count,
+                    'uniqueness_score': uniqueness_score,
+                    'is_ai_generated': True,
+                    'generation_mode': 'human_like_v7_retry_logic',
+                    'retry_count': retry_count
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Generation attempt {retry_count + 1} failed: {e}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    return {'error': f"AI generation failed after {max_retries} attempts: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
+        
+        # If all retries failed
+        return {'error': f'Failed to generate article after {max_retries} attempts', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
     def _remove_long_speeches(self, text: str) -> str:
         """🔥 NEW: Remove long speeches and excessive quotes"""
