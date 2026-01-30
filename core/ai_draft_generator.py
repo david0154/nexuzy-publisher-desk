@@ -665,7 +665,7 @@ class DraftGenerator:
                 if local_image_path:
                     try:
                         from core.vision_ai import VisionAI
-                        vision = VisionAI(self.db_path)
+                        vision = VisionAI()
                         watermark_check = vision._detect_watermark(local_image_path)
                         
                         if watermark_check['has_watermark'] and watermark_check['confidence'] > 0.6:
@@ -688,7 +688,7 @@ class DraftGenerator:
             # 🔥 NEUTRAL TITLE REWRITE
             new_title = self._rewrite_title_neutral(headline, category, topic_info)
             
-            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.UPPER()} angle...")
+            logger.info(f"🤖 Generating HUMAN-LIKE article with {selected_angle.upper()} angle...")
             
             draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info, selected_angle, topic_nouns)
             
