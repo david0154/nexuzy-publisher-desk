@@ -168,17 +168,40 @@ class DraftGenerator:
             matches = self.grammar_checker.check(text)
             
             # Filter important errors only (keep natural style imperfections)
-            important_matches = [
-                m for m in matches 
-                if m.ruleIssueType in ['misspelling', 'typographical']
-                # Exclude grammar rules that remove natural style
-                and 'CONJUNCTION' not in m.ruleId  # Allow And/But at sentence start
-                and 'CONTRACTION' not in m.ruleId  # Keep contractions
-            ]
+            important_matches = []
+            for m in matches:
+                # Check issue type using different possible attributes
+                issue_type = None
+                if hasattr(m, 'ruleIssueType'):
+                    issue_type = m.ruleIssueType
+                elif hasattr(m, 'issueType'):
+                    issue_type = m.issueType
+                
+                # Also check category attribute
+                category = getattr(m, 'category', '')
+                
+                # Include only spelling/typo errors
+                if (issue_type in ['misspelling', 'typographical', 'typo'] or 
+                    category in ['TYPOS', 'SPELLING'] or
+                    'MORFOLOGIK' in m.ruleId or 'SPELLING' in m.ruleId):
+                    # Exclude grammar rules that remove natural style
+                    if ('CONJUNCTION' not in m.ruleId and 
+                        'CONTRACTION' not in m.ruleId and
+                        'SENTENCE_WHITESPACE' not in m.ruleId):
+                        important_matches.append(m)
             
             if important_matches:
                 logger.info(f"📝 Found {len(important_matches)} spelling issues (keeping natural style)")
-                corrected_text = language_tool_python.utils.correct(text, important_matches)
+                
+                # Apply corrections manually to avoid utils issues
+                corrected_text = text
+                # Sort by offset descending to apply replacements from end to start
+                for m in sorted(important_matches, key=lambda x: x.offset, reverse=True):
+                    if m.replacements:
+                        start = m.offset
+                        end = m.offset + m.errorLength
+                        replacement = m.replacements[0]
+                        corrected_text = corrected_text[:start] + replacement + corrected_text[end:]
                 
                 errors_fixed = [
                     {
@@ -197,6 +220,8 @@ class DraftGenerator:
                 
         except Exception as e:
             logger.error(f"❌ Grammar check failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return text, []
     
     def _select_article_angle(self, headline: str, summary: str, category: str) -> str:
