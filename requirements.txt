@@ -48,3 +48,7 @@ protobuf==4.25.2
 # ===== WEB/API =====
 requests-toolbelt==1.0.0
 wptools==0.1.2
+
+# Language & Grammar Checking (News-safe)
+language-tool-python>=2.7.1,<2.8.0
+
