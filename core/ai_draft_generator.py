@@ -208,7 +208,21 @@ class DraftGenerator:
                 for m in sorted(important_matches, key=lambda x: x.offset, reverse=True):
                     if m.replacements:
                         start = m.offset
-                        end = m.offset + m.errorLength
+                        # 🔥 FIX: Use correct attribute - try multiple names
+                        error_len = None
+                        if hasattr(m, 'errorLength'):
+                            error_len = m.errorLength
+                        elif hasattr(m, 'errorlength'):
+                            error_len = m.errorlength
+                        elif hasattr(m, 'length'):
+                            error_len = m.length
+                        elif hasattr(m, 'matchlength'):
+                            error_len = m.matchlength
+                        else:
+                            # Fallback: calculate from context
+                            error_len = len(m.matchedText) if hasattr(m, 'matchedText') else len(m.context.strip())
+                        
+                        end = m.offset + error_len
                         replacement = m.replacements[0]
                         corrected_text = corrected_text[:start] + replacement + corrected_text[end:]
                 
