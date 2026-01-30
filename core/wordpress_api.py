@@ -1,6 +1,6 @@
 """
 WordPress API Module - COMPLETE VERSION
-FIXED: Category from RSS feed + Meta data alternative approach
+FIXED: Category from RSS feed + Meta data alternative approach + AI & Machine Learning category fix
 """
 
 import requests
@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 from html.parser import HTMLParser
 from collections import Counter
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -92,27 +93,54 @@ class WordPressAPI:
             logger.error(f"Error uploading image: {e}")
             return None
     
+    def _normalize_category_name(self, name: str) -> str:
+        """Normalize category name for comparison"""
+        # Replace & with 'and', remove extra spaces, lowercase
+        normalized = name.lower().strip()
+        normalized = normalized.replace('&', 'and')
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized
+    
     def get_or_create_category(self, category_name: str) -> Optional[int]:
-        """Get existing WordPress category ID or create new one"""
+        """Get existing WordPress category ID or create new one - FIXED for 'AI & Machine Learning'"""
         if not category_name or not category_name.strip():
             return None
         
         category_name = category_name.strip()
         
+        # Check cache first
         if category_name in self._category_cache:
+            logger.info(f"✅ Using cached category: {category_name} (ID: {self._category_cache[category_name]})")
             return self._category_cache[category_name]
         
         try:
-            response = self.session.get(self.categories_url, params={'search': category_name, 'per_page': 10}, timeout=10)
+            # First, get ALL categories (without search filter)
+            # This is more reliable for categories with special characters like &
+            response = self.session.get(self.categories_url, params={'per_page': 100}, timeout=10)
             
             if response.ok:
-                for cat in response.json():
-                    if cat.get('name', '').lower() == category_name.lower():
+                all_categories = response.json()
+                
+                # Exact match first
+                for cat in all_categories:
+                    if cat.get('name', '') == category_name:
                         cat_id = cat.get('id')
                         self._category_cache[category_name] = cat_id
-                        logger.info(f"✅ Found existing category: {category_name} (ID: {cat_id})")
+                        logger.info(f"✅ Found exact match category: {category_name} (ID: {cat_id})")
+                        return cat_id
+                
+                # Case-insensitive match
+                normalized_search = self._normalize_category_name(category_name)
+                for cat in all_categories:
+                    cat_normalized = self._normalize_category_name(cat.get('name', ''))
+                    if cat_normalized == normalized_search:
+                        cat_id = cat.get('id')
+                        self._category_cache[category_name] = cat_id
+                        logger.info(f"✅ Found normalized match: '{cat.get('name')}' for '{category_name}' (ID: {cat_id})")
                         return cat_id
             
+            # If not found, create new category
+            logger.info(f"📝 Creating new category: {category_name}")
             create_response = self.session.post(self.categories_url, json={'name': category_name}, timeout=10)
             
             if create_response.ok:
@@ -120,8 +148,13 @@ class WordPressAPI:
                 self._category_cache[category_name] = cat_id
                 logger.info(f"✅ Created new category: {category_name} (ID: {cat_id})")
                 return cat_id
+            else:
+                logger.error(f"❌ Failed to create category '{category_name}': {create_response.status_code}")
+                logger.error(f"   Response: {create_response.text[:500]}")
         except Exception as e:
-            logger.error(f"Error handling category: {e}")
+            logger.error(f"❌ Error handling category '{category_name}': {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return None
     
@@ -321,7 +354,7 @@ class WordPressAPI:
     def publish_draft(self, draft_id: int, workspace_id: int, categories: Optional[List[str]] = None, tags: Optional[List[str]] = None) -> Optional[Dict]:
         """
         Publish draft to WordPress with FULL SEO SUPPORT
-        FIXED: Category from RSS feed + Working SEO approach
+        FIXED: Category from RSS feed + Working SEO approach + AI & Machine Learning fix
         """
         try:
             if not self._initialize_connection(workspace_id):
@@ -362,13 +395,17 @@ class WordPressAPI:
             if categories is None:
                 categories = self._extract_categories_from_rss_feed(draft_id)
             
-            logger.info(f"📋 Categories from RSS: {categories}")
+            logger.info(f"📋 Categories to assign: {categories}")
             
             if categories:
                 for cat_name in categories:
+                    logger.info(f"🔍 Processing category: '{cat_name}'")
                     cat_id = self.get_or_create_category(cat_name)
                     if cat_id:
                         category_ids.append(cat_id)
+                        logger.info(f"   ✅ Assigned category ID: {cat_id}")
+                    else:
+                        logger.error(f"   ❌ Failed to get/create category: {cat_name}")
             
             # Get tags (keywords)
             tag_ids = []
@@ -380,7 +417,7 @@ class WordPressAPI:
                 if tag_id:
                     tag_ids.append(tag_id)
             
-            logger.info(f"🏷️ Categories: {len(category_ids)}, Tags: {len(tag_ids)}")
+            logger.info(f"🏷️ Final counts - Categories: {len(category_ids)}, Tags: {len(tag_ids)}")
             
             # Convert to Gutenberg
             gutenberg_content = self._convert_to_gutenberg_blocks(body_content, featured_media_id)
@@ -407,6 +444,7 @@ class WordPressAPI:
                 post_data['tags'] = tag_ids
             
             logger.info(f"📤 Sending to WordPress...")
+            logger.info(f"   Post data: title={len(title)} chars, content={len(gutenberg_content)} chars, categories={category_ids}")
             
             response = self.session.post(self.posts_url, json=post_data, timeout=60)
             
@@ -427,11 +465,21 @@ class WordPressAPI:
             self._update_post_meta(post_id, seo_excerpt, keywords)
             
             posted_content = post.get('content', {}).get('rendered', '')
+            
+            # Get actual category names from response
+            category_names = []
+            if 'categories' in post:
+                for cat_id in post['categories']:
+                    for cat_name, cached_id in self._category_cache.items():
+                        if cached_id == cat_id:
+                            category_names.append(cat_name)
+                            break
+            
             logger.info(f"\n✅ POST CREATED SUCCESSFULLY!")
             logger.info(f"   Post ID: {post_id}")
             logger.info(f"   URL: {post_url}")
             logger.info(f"   Content: {len(posted_content)} chars")
-            logger.info(f"   Categories: {category_ids} ({', '.join(categories)})")
+            logger.info(f"   Categories: {category_ids} ({', '.join(category_names or categories)})")
             logger.info(f"   Tags: {len(tag_ids)} ({', '.join(keywords[:5])}...)")
             logger.info(f"   SEO Excerpt: {seo_excerpt[:60]}...")
             logger.info(f"\n✅ SEO plugins (Yoast/AIOSEO) will automatically use:")
