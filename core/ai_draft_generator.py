@@ -4,6 +4,9 @@ Generates UNIQUE, comprehensive articles WITHOUT visible structure labels
 
 FEATURES:
 ✅ 800-2000 word articles
+✅ Pre-writing angle selection (ONE clear focus)
+✅ Neutral tone enforcement
+✅ Grammar and spelling checking
 ✅ Anti-plagiarism system with advanced variation
 ✅ MANDATORY title uniqueness and rewrite
 ✅ Enhanced human-like writing with personality
@@ -15,11 +18,12 @@ FEATURES:
 ✅ Advanced paraphrasing and synonym variation
 ✅ Contextual sentence restructuring
 ✅ Natural flow with varied transitions
+✅ No fictionalized speeches or excessive rhetorical quotes
 """
 
 import sqlite3
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import random
 import re
@@ -36,6 +40,7 @@ logger = logging.getLogger(__name__)
 # GLOBAL MODEL CACHE - shared between AI Writer and Research Writer
 _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
+_GRAMMAR_CHECKER = None
 
 # Enhanced synonym dictionary for uniqueness
 SYNONYM_DICT = {
@@ -73,35 +78,35 @@ SYNONYM_DICT = {
     'put': ['place', 'position', 'set', 'situate', 'locate', 'install'],
 }
 
-# Title rewrite templates with more variety
-TITLE_PATTERNS = [
-    "{topic}: What This Means for {audience}",
-    "Breaking: {topic} - Key Details Revealed",
-    "{topic}: A Comprehensive Analysis",
-    "Understanding {topic}: The Full Story",
-    "{topic}: Impact and Implications",
-    "How {topic} Will Change {industry}",
-    "{topic}: Expert Analysis and Insights",
-    "The Truth About {topic}: What You Need to Know",
-    "{topic}: Latest Developments and Updates",
-    "Inside {topic}: Complete Report",
-    "{topic}: Why It Matters to {audience}",
-    "Exclusive: {topic} - Breaking Down the Details",
-    "{topic}: Everything You Should Know",
-    "Deep Dive: {topic} and Its Consequences",
-    "{topic}: A Fresh Perspective",
-    "{topic}: Exploring the Implications for {industry}",
-    "{topic}: Critical Insights and Analysis",
-    "{topic}: What Industry Leaders Are Saying",
-    "{topic}: The Complete Picture",
-    "{topic}: Behind the Headlines",
+# Neutral title templates (avoiding sensationalism)
+NEUTRAL_TITLE_PATTERNS = [
+    "{topic}: Analysis and Key Details",
+    "{topic}: What to Know About Recent Developments",
+    "{topic}: Overview of Current Situation",
+    "Understanding {topic}: Facts and Context",
+    "{topic}: Recent Updates and Information",
+    "{topic}: Examining the Details",
+    "{topic}: Current Status and Background",
+    "{topic}: Key Points and Analysis",
+    "{topic}: Developments and Implications",
+    "{topic}: A Factual Review",
 ]
+
+# Article angles for pre-writing step
+ARTICLE_ANGLES = {
+    'impact': 'Focus on the direct and indirect consequences for stakeholders',
+    'analysis': 'Provide analytical breakdown of the situation with data and context',
+    'public_reaction': 'Examine how different groups and communities are responding',
+    'policy': 'Analyze policy implications and regulatory considerations',
+    'symbolism': 'Explore the broader symbolic meaning and cultural significance',
+    'expert': 'Present expert interpretations and professional perspectives'
+}
 
 class DraftGenerator:
     """Generate UNIQUE, LONG AI-rewritten news articles (800-2000 words)"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
-        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL
+        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _GRAMMAR_CHECKER
         
         self.db_path = db_path
         self.model_name = model_name
@@ -126,10 +131,161 @@ class DraftGenerator:
             if self.sentence_model:
                 _CACHED_SENTENCE_MODEL = self.sentence_model
         
+        # Initialize grammar checker
+        if _GRAMMAR_CHECKER:
+            self.grammar_checker = _GRAMMAR_CHECKER
+        else:
+            self.grammar_checker = self._load_grammar_checker()
+            if self.grammar_checker:
+                _GRAMMAR_CHECKER = self.grammar_checker
+        
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
-            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output, Research Enabled)")
+            logger.info("✅ AI Writer LOADED (800-2000 words, Clean Output, Grammar Check, Neutral Tone)")
+    
+    def _load_grammar_checker(self):
+        """Load grammar and spelling checker"""
+        try:
+            import language_tool_python
+            logger.info("⏳ Loading grammar checker...")
+            tool = language_tool_python.LanguageTool('en-US')
+            logger.info("✅ Grammar checker loaded")
+            return tool
+        except ImportError:
+            logger.warning("⚠️  language_tool_python not installed. Run: pip install language-tool-python")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️  Grammar checker unavailable: {e}")
+            return None
+    
+    def _check_grammar_and_spelling(self, text: str) -> Tuple[str, List[Dict]]:
+        """Check and fix grammar and spelling errors"""
+        if not self.grammar_checker:
+            return text, []
+        
+        try:
+            logger.info("🔍 Checking grammar and spelling...")
+            matches = self.grammar_checker.check(text)
+            
+            # Filter important errors (ignore minor style suggestions)
+            important_matches = [
+                m for m in matches 
+                if m.ruleIssueType in ['misspelling', 'grammar', 'typographical']
+            ]
+            
+            if important_matches:
+                logger.info(f"📝 Found {len(important_matches)} grammar/spelling issues")
+                corrected_text = language_tool_python.utils.correct(text, important_matches)
+                
+                errors_fixed = [
+                    {
+                        'message': m.message,
+                        'context': m.context,
+                        'replacements': m.replacements[:3]
+                    }
+                    for m in important_matches[:10]  # Log first 10
+                ]
+                
+                logger.info(f"✅ Grammar check complete. Fixed {len(important_matches)} issues")
+                return corrected_text, errors_fixed
+            else:
+                logger.info("✅ No grammar or spelling errors found")
+                return text, []
+                
+        except Exception as e:
+            logger.error(f"❌ Grammar check failed: {e}")
+            return text, []
+    
+    def _select_article_angle(self, headline: str, summary: str, category: str) -> str:
+        """🔥 NEW: Pre-writing step - Select ONE clear article angle"""
+        text = (headline + ' ' + summary).lower()
+        
+        # Score each angle based on content
+        angle_scores = {}
+        
+        # Impact indicators
+        if any(word in text for word in ['impact', 'affect', 'consequence', 'result', 'effect', 'influence']):
+            angle_scores['impact'] = angle_scores.get('impact', 0) + 2
+        
+        # Analysis indicators  
+        if any(word in text for word in ['data', 'statistics', 'report', 'study', 'research', 'analysis', 'findings']):
+            angle_scores['analysis'] = angle_scores.get('analysis', 0) + 2
+        
+        # Public reaction indicators
+        if any(word in text for word in ['protest', 'reaction', 'response', 'public', 'people', 'community', 'citizens']):
+            angle_scores['public_reaction'] = angle_scores.get('public_reaction', 0) + 2
+        
+        # Policy indicators
+        if any(word in text for word in ['policy', 'law', 'regulation', 'legislation', 'government', 'rule', 'mandate']):
+            angle_scores['policy'] = angle_scores.get('policy', 0) + 2
+        
+        # Symbolism indicators
+        if any(word in text for word in ['symbol', 'represent', 'significance', 'meaning', 'historic', 'milestone']):
+            angle_scores['symbolism'] = angle_scores.get('symbolism', 0) + 2
+        
+        # Expert interpretation indicators
+        if any(word in text for word in ['expert', 'analyst', 'professor', 'researcher', 'specialist', 'authority']):
+            angle_scores['expert'] = angle_scores.get('expert', 0) + 2
+        
+        # Select angle with highest score, or random if tie
+        if angle_scores:
+            selected_angle = max(angle_scores, key=angle_scores.get)
+        else:
+            # Default based on category
+            category_angles = {
+                'Technology': 'analysis',
+                'Business': 'impact',
+                'Politics': 'policy',
+                'Health': 'expert',
+                'Sports': 'analysis',
+                'Entertainment': 'public_reaction'
+            }
+            selected_angle = category_angles.get(category, 'impact')
+        
+        logger.info(f"📐 Selected article angle: {selected_angle.upper()}")
+        return selected_angle
+    
+    def _extract_topic_nouns(self, headline: str, summary: str) -> List[str]:
+        """Extract key topic nouns for first paragraph comparison"""
+        text = headline + ' ' + summary
+        
+        # Extract capitalized terms (likely proper nouns)
+        words = text.split()
+        capitalized = [
+            w.strip('.,!?;:') for w in words 
+            if w and len(w) > 2 and w[0].isupper() 
+            and w.upper() != w  # Exclude all-caps
+            and w not in ['The', 'A', 'An', 'And', 'Or', 'But', 'In', 'On', 'At', 'To', 'For']
+        ]
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_nouns = []
+        for noun in capitalized:
+            if noun.lower() not in seen:
+                seen.add(noun.lower())
+                unique_nouns.append(noun)
+        
+        return unique_nouns[:5]  # Return top 5
+    
+    def _create_neutral_opening(self, topic_nouns: List[str], angle: str, summary: str) -> str:
+        """Create neutral opening paragraph that compares topic nouns naturally"""
+        if len(topic_nouns) < 2:
+            return ""
+        
+        # Create natural comparison based on angle
+        angle_templates = {
+            'impact': f"{topic_nouns[0]} and {topic_nouns[1]} are experiencing significant developments that affect stakeholders across multiple sectors.",
+            'analysis': f"Recent data regarding {topic_nouns[0]} and {topic_nouns[1]} reveals important trends worth examining.",
+            'public_reaction': f"The relationship between {topic_nouns[0]} and {topic_nouns[1]} has drawn considerable public attention.",
+            'policy': f"Policy discussions involving {topic_nouns[0]} and {topic_nouns[1]} are shaping regulatory approaches.",
+            'symbolism': f"The connection between {topic_nouns[0]} and {topic_nouns[1]} carries broader significance.",
+            'expert': f"Specialists are analyzing the intersection of {topic_nouns[0]} and {topic_nouns[1]}."
+        }
+        
+        opening = angle_templates.get(angle, f"{topic_nouns[0]} and {topic_nouns[1]} are at the center of recent developments.")
+        return opening
     
     def _detect_model_type(self, model_path: Path) -> str:
         """Auto-detect model type"""
@@ -256,59 +412,42 @@ class DraftGenerator:
             'sports': ['team', 'player', 'match', 'game', 'win', 'championship', 'score', 'sport', 'athlete', 'coach', 'tournament', 'league', 'competition', 'season', 'victory'],
         }
     
-    def _rewrite_title_mandatory(self, original_headline: str, category: str, topic_info: Dict) -> str:
+    def _rewrite_title_neutral(self, original_headline: str, category: str, topic_info: Dict) -> str:
         """
-        🔥 MANDATORY title rewrite - ALWAYS creates unique title
+        🔥 IMPROVED: MANDATORY neutral title rewrite
         """
-        logger.info(f"🔄 Rewriting title (MANDATORY): {original_headline}")
+        logger.info(f"🔄 Rewriting title (NEUTRAL TONE): {original_headline}")
         
         # Extract key topic
         words = original_headline.split()
         capitalized = [w for w in words if w and len(w) > 2 and w[0].isupper()]
         
-        # Get main topic (first 2-3 capitalized words or main subject)
+        # Get main topic
         if capitalized:
             topic = ' '.join(capitalized[:3])
         else:
-            # Use first 3-5 words
             topic = ' '.join(words[:5])
         
-        # Determine audience based on category
-        audience_map = {
-            'Technology': 'Tech Industry',
-            'Business': 'Investors',
-            'Politics': 'Citizens',
-            'Health': 'Public Health',
-            'Sports': 'Fans',
-            'Entertainment': 'Audiences',
-        }
-        audience = audience_map.get(category, 'Readers')
+        # Remove sensational words from topic
+        sensational_words = ['Breaking', 'Exclusive', 'Shocking', 'Amazing', 'Incredible', 'Stunning', 'Bombshell']
+        for word in sensational_words:
+            topic = topic.replace(word, '').strip()
         
-        industry_map = {
-            'Technology': 'the Tech Sector',
-            'Business': 'Markets',
-            'Politics': 'Governance',
-            'Health': 'Healthcare',
-            'Sports': 'Sports World',
-            'Entertainment': 'Entertainment Industry',
-        }
-        industry = industry_map.get(category, 'the Industry')
-        
-        # Try multiple patterns until unique
+        # Try neutral patterns
         max_attempts = 5
         for attempt in range(max_attempts):
-            pattern = random.choice(TITLE_PATTERNS)
-            new_title = pattern.format(topic=topic, audience=audience, industry=industry)
+            pattern = random.choice(NEUTRAL_TITLE_PATTERNS)
+            new_title = pattern.format(topic=topic)
             
             uniqueness_check = self._check_title_uniqueness(new_title)
             
             if uniqueness_check['is_unique']:
-                logger.info(f"✅ NEW UNIQUE TITLE: {new_title}")
+                logger.info(f"✅ NEW NEUTRAL TITLE: {new_title}")
                 return new_title
         
-        # Fallback: timestamp-based unique title
-        new_title = f"{topic}: Complete Analysis ({datetime.now().strftime('%B %Y')})"
-        logger.warning(f"⚠️  Using timestamped fallback: {new_title}")
+        # Fallback
+        new_title = f"{topic}: Current Status and Analysis"
+        logger.warning(f"⚠️  Using fallback: {new_title}")
         return new_title
     
     def _check_title_uniqueness(self, proposed_title: str) -> Dict:
@@ -361,14 +500,11 @@ class DraftGenerator:
     def _generate_unique_title_variant(self, original_title: str) -> str:
         """Generate unique title variant"""
         variations = [
-            f"{original_title}: What You Need to Know",
-            f"{original_title} - Latest Update",
-            f"{original_title}: Key Details Revealed",
-            f"{original_title} - Breaking Analysis",
-            f"{original_title}: Complete Report",
-            f"{original_title} - Comprehensive Guide",
-            f"{original_title}: The Full Picture",
-            f"{original_title} - In-Depth Look",
+            f"{original_title}: Latest Information",
+            f"{original_title} - Updated Report",
+            f"{original_title}: Key Facts",
+            f"{original_title} - Current Analysis",
+            f"{original_title}: Complete Overview",
         ]
         return random.choice(variations)
     
@@ -452,7 +588,7 @@ class DraftGenerator:
             return None
     
     def generate_draft(self, news_id: int, manual_mode: bool = False, manual_content: str = '') -> Dict:
-        """Generate UNIQUE, LONG article (800-2000 words) with MANDATORY title rewrite"""
+        """Generate UNIQUE, LONG article with neutral tone and grammar checking"""
         try:
             if not self.llm:
                 error_msg = "❌ AI model not loaded"
@@ -498,29 +634,41 @@ class DraftGenerator:
                     except Exception as e:
                         logger.warning(f"⚠️  Watermark check failed: {e}")
             
+            # 🔥 PRE-WRITING STEP 1: Select article angle
+            selected_angle = self._select_article_angle(headline, summary or '', category)
+            
+            # 🔥 PRE-WRITING STEP 2: Extract topic nouns for comparison
+            topic_nouns = self._extract_topic_nouns(headline, summary or '')
+            
             topic_info = self._extract_topic_info(headline, summary or '', category)
             
-            # 🔥 MANDATORY TITLE REWRITE - ALWAYS generates new unique title
-            new_title = self._rewrite_title_mandatory(headline, category, topic_info)
+            # 🔥 NEUTRAL TITLE REWRITE
+            new_title = self._rewrite_title_neutral(headline, category, topic_info)
             
-            logger.info(f"🤖 Generating LONG UNIQUE article (800-2000 words): {new_title[:50]}...")
+            logger.info(f"🤖 Generating article with {selected_angle.upper()} angle...")
             
-            draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info)
+            draft = self._generate_with_model(new_title, summary, category, source_domain, topic_info, selected_angle, topic_nouns)
             
             if 'error' in draft or not draft.get('body_draft'):
                 error_msg = draft.get('error', 'AI generation failed')
                 logger.error(f"❌ Generation failed: {error_msg}")
                 return {'error': error_msg, 'title': new_title, 'body_draft': '', 'word_count': 0}
             
+            # 🔥 GRAMMAR AND SPELLING CHECK
+            corrected_body, grammar_errors = self._check_grammar_and_spelling(draft['body_draft'])
+            draft['body_draft'] = corrected_body
+            draft['grammar_corrections'] = len(grammar_errors)
+            
             draft['image_url'] = image_url or ''
             draft['local_image_path'] = local_image_path or ''
             draft['source_url'] = source_url or ''
             draft['source_domain'] = source_domain or ''
             draft['is_html'] = True
+            draft['article_angle'] = selected_angle
             
             draft_id = self._store_draft(news_id, workspace_id, draft)
             
-            logger.info(f"✅ Generated draft {draft_id}, words: {draft.get('word_count', 0)}")
+            logger.info(f"✅ Generated draft {draft_id}, words: {draft.get('word_count', 0)}, grammar fixes: {draft.get('grammar_corrections', 0)}")
             return {**draft, 'id': draft_id}
         
         except Exception as e:
@@ -545,8 +693,8 @@ class DraftGenerator:
                 varied_words.append(word)
                 continue
             
-            # 40% chance to replace with synonym (increased from 35%)
-            if word_lower in SYNONYM_DICT and random.random() < 0.40:
+            # 35% chance to replace with synonym
+            if word_lower in SYNONYM_DICT and random.random() < 0.35:
                 synonym = random.choice(SYNONYM_DICT[word_lower])
                 # Preserve capitalization
                 if word and word[0].isupper():
@@ -558,106 +706,76 @@ class DraftGenerator:
         
         return ' '.join(varied_words)
     
-    def _paraphrase_sentence(self, sentence: str) -> str:
-        """
-        🔥 NEW: Paraphrase sentence to improve uniqueness
-        """
-        if not sentence or len(sentence) < 20:
-            return sentence
-        
-        # Apply passive to active voice conversion
-        passive_patterns = [
-            (r'was (\w+ed) by', r'actively \1'),
-            (r'were (\w+ed) by', r'actively \1'),
-            (r'has been (\w+ed)', r'has actively \1'),
-        ]
-        
-        paraphrased = sentence
-        for pattern, replacement in passive_patterns:
-            if random.random() < 0.3:
-                paraphrased = re.sub(pattern, replacement, paraphrased)
-        
-        return paraphrased
-    
-    def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict) -> Dict:
-        """Generate LONG article with enhanced uniqueness and human touch"""
+    def _generate_with_model(self, headline: str, summary: str, category: str, source: str, topic_info: Dict, angle: str, topic_nouns: List[str]) -> Dict:
+        """Generate article with selected angle and neutral tone"""
         
         topic_context = f"""Topic: {topic_info['focus']}
 Category: {category}
 Key Terms: {', '.join(topic_info['capitalized_terms'][:5])}
 Statistics: {', '.join(topic_info['numbers'][:3])}"""
         
-        # Human-like writing styles
-        writing_styles = [
-            "Write like an experienced journalist with 10+ years experience",
-            "Write in a clear, accessible style that engages readers",
-            "Write with authority and depth, like a subject matter expert",
-            "Write in a narrative style that tells the complete story",
-            "Write analytically, connecting facts to broader implications",
-            "Write in an investigative style, revealing key details progressively",
-        ]
+        # Get angle-specific instruction
+        angle_instruction = ARTICLE_ANGLES[angle]
         
-        unique_angles = [
-            "Focus on the real-world impact and practical implications",
-            "Emphasize the human stories and personal experiences involved",
-            "Analyze the strategic and economic dimensions",
-            "Explore historical context and future projections",
-            "Examine the technical details and underlying mechanisms",
-            "Connect this development to broader industry trends",
-        ]
+        # Create opening hook
+        opening_hook = self._create_neutral_opening(topic_nouns, angle, summary)
         
-        style_instruction = random.choice(writing_styles)
-        angle_instruction = random.choice(unique_angles)
-        
-        # 🔥 ENHANCED PROMPT with stronger uniqueness requirements
-        prompt = f"""You are a professional journalist. {style_instruction}. {angle_instruction}.
+        # 🔥 IMPROVED PROMPT with neutral tone and no speeches
+        prompt = f"""You are a professional journalist writing a factual news article. Write in a neutral, objective tone without sensationalism.
+
+Article Angle: {angle_instruction}
 
 Headline: {headline}
 Summary: {summary}
 
 {topic_context}
 
-Write a comprehensive, UNIQUE news article (1000-1500 words). Requirements:
+Opening Hook (use this as your first sentence): {opening_hook}
+
+Write a comprehensive news article (1000-1500 words). Requirements:
+
+NEUTRAL TONE:
+1. Use factual, objective language
+2. Avoid emotional or sensational words
+3. Present multiple perspectives fairly
+4. Cite facts and verifiable information
+5. Maintain professional distance
 
 WRITING STYLE:
-1. Write naturally with varied sentence structure (mix short punchy sentences with longer analytical ones)
-2. Use active voice predominantly but mix in passive voice strategically  
-3. Include specific details, quotes, and facts
-4. Connect ideas with smooth, logical transitions
-5. Write conversationally but professionally
-6. Vary paragraph length (2-5 sentences, never uniform)
-7. Use concrete examples and real-world applications
-8. Add expert perspectives and industry context
-
-UNIQUENESS REQUIREMENTS:
-1. NEVER copy phrases or sentence structures from typical news articles
-2. Use original phrasing and fresh vocabulary
-3. Present information from a unique angle
-4. Include analysis and interpretation, not just facts
-5. Connect to broader trends and implications
-6. Use varied sentence beginnings and structures
+1. Vary sentence structure naturally
+2. Use active voice primarily
+3. Keep paragraphs 2-4 sentences
+4. Include specific details and data
+5. Connect ideas logically
 
 CRITICAL - DO NOT:
-- Include section labels ("Introduction:", "Background:", "Conclusion:")
-- Start multiple paragraphs with "Industry experts note that"
-- Use repetitive sentence starters or formulaic phrases
-- Write in a robotic, predictable style
-- Include meta-commentary about the article itself
-- Use cliché phrases like "only time will tell" or "remains to be seen"
+- Include long speeches or monologues (max 1-2 short sentences per quote)
+- Use multiple rhetorical quotes
+- Include section labels ("Introduction:", "Background:")
+- Start paragraphs repetitively
+- Use cliché phrases
+- Include sensational language
+- Write fictional or speculative quotes
 
-Write the article now in flowing, natural paragraphs with unique phrasing:
+QUOTES (if needed):
+- Keep quotes brief (1-2 sentences maximum)
+- Attribute clearly to real sources
+- Use sparingly (no more than 2-3 total)
+- Focus on factual statements, not rhetoric
+
+Write the article now:
 
 Article:"""
         
         try:
-            logger.info("⏳ Generating LONG unique content with human touch (60-90 seconds)...")
+            logger.info("⏳ Generating neutral-tone article with selected angle...")
             
             generated_text = self.llm(
                 prompt,
                 max_new_tokens=1500,
-                temperature=0.92,  # Increased for more creativity
-                top_p=0.95,  # Broader sampling
-                repetition_penalty=1.35,  # Stronger penalty against repetition
+                temperature=0.85,  # Slightly lower for more factual tone
+                top_p=0.92,
+                repetition_penalty=1.35,
                 stop=["\n\n\n\n", "Article:", "Summary:", "Note:", "Disclaimer:"],
                 stream=False
             )
@@ -671,43 +789,29 @@ Article:"""
                 logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
                 return {'error': f'AI generated only {len(generated_text)} chars. Need 800+ words.', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # 🔧 CLEAN: Remove section headers and repetitive phrases
+            # Clean text
             cleaned_text = self._clean_generated_text(generated_text)
+            
+            # Remove long speeches and excessive quotes
+            cleaned_text = self._remove_long_speeches(cleaned_text)
             
             if len(cleaned_text) < 500:
                 logger.error("❌ Cleaned text too short")
                 return {'error': 'Text too short after cleaning', 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
             
-            # 🔥 Apply multi-layer uniqueness enhancement
-            logger.info("🔄 Applying multi-layer uniqueness enhancements...")
-            
-            # Layer 1: Synonym variation
+            # Apply uniqueness layers
             varied_text = self._apply_synonym_variation(cleaned_text)
-            
-            # Layer 2: Sentence structure variation
             restructured_text = self._vary_sentence_structure(varied_text)
-            
-            # Layer 3: Boost uniqueness with varied connectors
             boosted_text = self._boost_uniqueness(restructured_text, topic_info)
-            
-            # Layer 4: Advanced paraphrasing
             final_text = self._advanced_paraphrase(boosted_text)
             
             # Convert to HTML
             html_content = self._convert_to_html(final_text)
             
             word_count = len(final_text.split())
-            
-            if word_count < 800:
-                logger.warning(f"⚠️  Word count low: {word_count} (target: 800-2000)")
-            elif word_count > 2000:
-                logger.info(f"✅ Excellent! {word_count} words (exceeds target)")
-            else:
-                logger.info(f"✅ Perfect! {word_count} words (within range)")
-            
-            # Calculate uniqueness score
             uniqueness_score = self._calculate_uniqueness_score(final_text)
-            logger.info(f"📊 Uniqueness score: {uniqueness_score:.1%}")
+            
+            logger.info(f"✅ Article generated: {word_count} words, uniqueness: {uniqueness_score:.1%}")
             
             return {
                 'title': headline,
@@ -716,7 +820,7 @@ Article:"""
                 'word_count': word_count,
                 'uniqueness_score': uniqueness_score,
                 'is_ai_generated': True,
-                'generation_mode': 'ai_model_enhanced_uniqueness_v4'
+                'generation_mode': 'neutral_tone_angle_based_v5'
             }
         except Exception as e:
             logger.error(f"❌ Model generation error: {e}")
@@ -724,10 +828,51 @@ Article:"""
             logger.error(traceback.format_exc())
             return {'error': f"AI generation failed: {str(e)}", 'title': headline, 'body_draft': '', 'summary': summary, 'word_count': 0}
     
+    def _remove_long_speeches(self, text: str) -> str:
+        """🔥 NEW: Remove long speeches and excessive quotes"""
+        # Find quoted sections
+        quote_pattern = r'"([^"]{100,})"'  # Quotes longer than 100 chars
+        
+        def shorten_quote(match):
+            full_quote = match.group(1)
+            # Keep only first sentence
+            sentences = re.split(r'[.!?]+', full_quote)
+            if sentences:
+                return f'"{sentences[0].strip()}."'
+            return match.group(0)
+        
+        # Shorten long quotes
+        text = re.sub(quote_pattern, shorten_quote, text)
+        
+        # Remove rhetorical patterns
+        rhetorical_patterns = [
+            r'"How can we[^"]{30,}"',
+            r'"Why should[^"]{30,}"',
+            r'"What if[^"]{30,}"',
+            r'"Is it not[^"]{30,}"',
+        ]
+        
+        for pattern in rhetorical_patterns:
+            text = re.sub(pattern, '', text)
+        
+        # Limit consecutive paragraphs with quotes
+        paragraphs = text.split('\n\n')
+        filtered_paragraphs = []
+        consecutive_quotes = 0
+        
+        for para in paragraphs:
+            if '"' in para:
+                consecutive_quotes += 1
+                if consecutive_quotes <= 2:  # Max 2 consecutive quote paragraphs
+                    filtered_paragraphs.append(para)
+            else:
+                consecutive_quotes = 0
+                filtered_paragraphs.append(para)
+        
+        return '\n\n'.join(filtered_paragraphs)
+    
     def _vary_sentence_structure(self, text: str) -> str:
-        """
-        🔥 IMPROVED: Vary sentence structure for better uniqueness
-        """
+        """Vary sentence structure for better uniqueness"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
@@ -736,13 +881,11 @@ Article:"""
                 varied_sentences.append(sent)
                 continue
             
-            # 25% chance to restructure sentence (increased from 20%)
-            if random.random() < 0.25 and len(sent) > 40:
-                # Try to invert sentence structure
+            # 20% chance to restructure
+            if random.random() < 0.20 and len(sent) > 40:
                 if ', ' in sent:
                     parts = sent.split(', ', 1)
                     if len(parts) == 2 and len(parts[1]) > 20:
-                        # Avoid starting with lowercase
                         if parts[1][0].islower():
                             sent = f"{parts[1][0].upper()}{parts[1][1:]}, while {parts[0].lower()}"
                         else:
@@ -753,13 +896,10 @@ Article:"""
         return ''.join(varied_sentences)
     
     def _advanced_paraphrase(self, text: str) -> str:
-        """
-        🔥 NEW: Advanced paraphrasing layer for maximum uniqueness
-        """
+        """Advanced paraphrasing for uniqueness"""
         sentences = re.split(r'([.!?]\s+)', text)
         paraphrased_sentences = []
         
-        # Common phrase replacements for uniqueness
         phrase_replacements = {
             'in order to': 'to',
             'due to the fact that': 'because',
@@ -776,7 +916,7 @@ Article:"""
         for sent in sentences:
             if sent.strip() and sent not in ['. ', '! ', '? ']:
                 for wordy, concise in phrase_replacements.items():
-                    if random.random() < 0.3:  # 30% chance to replace
+                    if random.random() < 0.3:
                         sent = sent.replace(wordy, concise)
             
             paraphrased_sentences.append(sent)
@@ -784,9 +924,7 @@ Article:"""
         return ''.join(paraphrased_sentences)
     
     def _calculate_uniqueness_score(self, text: str) -> float:
-        """
-        🔥 IMPROVED: Calculate uniqueness score based on multiple factors
-        """
+        """Calculate uniqueness score"""
         words = text.lower().split()
         if len(words) < 50:
             return 0.5
@@ -794,7 +932,6 @@ Article:"""
         unique_words = set(words)
         vocabulary_diversity = len(unique_words) / len(words)
         
-        # Check for common filler words
         common_words = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']
         content_words = [w for w in words if w not in common_words]
         
@@ -803,7 +940,6 @@ Article:"""
         
         unique_content = len(set(content_words)) / len(content_words)
         
-        # Check sentence structure variety
         sentences = re.split(r'[.!?]+', text)
         sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
         
@@ -813,41 +949,35 @@ Article:"""
         else:
             length_variance = 0
         
-        # Weighted average of metrics
         uniqueness = (vocabulary_diversity * 0.4 + unique_content * 0.4 + min(length_variance, 1.0) * 0.2)
         
         return uniqueness
     
     def _boost_uniqueness(self, text: str, topic_info: Dict) -> str:
-        """🔥 ENHANCED: Boost content uniqueness with diverse connectors"""
+        """Boost content uniqueness with varied connectors"""
         sentences = re.split(r'([.!?]\s+)', text)
         varied_sentences = []
         
-        # More diverse sentence starters
         starters = [
             'Additionally, ', 'Furthermore, ', 'Moreover, ', 'In particular, ',
-            'Notably, ', 'Significantly, ', 'Importantly, ', 'According to analysts, ',
-            'Recent reports suggest that ', 'Data indicates that ', 'Experts observe that ',
+            'Notably, ', 'Significantly, ', 'Importantly, ',
+            'Recent reports suggest that ', 'Data indicates that ',
             'Meanwhile, ', 'Conversely, ', 'In contrast, ', 'As a result, ',
             'Consequently, ', 'Nevertheless, ', 'On the other hand, ',
-            'Interestingly, ', 'Remarkably, ', 'In fact, ', 'What\'s more, ',
-            'Beyond that, ', 'In this context, ', 'From this perspective, ',
-            'Looking at the broader picture, ', 'Taking into account recent developments, ',
-            'Given these circumstances, ', 'In light of these findings, ',
+            'Interestingly, ', 'Remarkably, ', 'In fact, ',
         ]
         
         used_starters = set()
         
         for i, sent in enumerate(sentences):
             if i > 0 and i % 4 == 0 and sent.strip() and len(sent) > 20:
-                # Don't reuse starters
                 available_starters = [s for s in starters if s not in used_starters]
                 if not available_starters:
                     used_starters.clear()
                     available_starters = starters
                 
                 if not any(sent.strip().startswith(s.strip()) for s in starters):
-                    if random.random() > 0.4:  # 60% chance to add starter
+                    if random.random() > 0.5:
                         starter = random.choice(available_starters)
                         used_starters.add(starter)
                         sent = starter + sent.strip()[0].lower() + sent.strip()[1:]
@@ -856,9 +986,7 @@ Article:"""
         return ''.join(varied_sentences)
     
     def _clean_generated_text(self, text: str) -> str:
-        """
-        🔧 IMPROVED: Clean AI-generated text and remove all section markers
-        """
+        """Clean AI-generated text and remove section markers"""
         unwanted_phrases = [
             "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
             "[This article", "This content was", "As an AI", "I cannot", "I apologize",
@@ -868,7 +996,6 @@ Article:"""
         
         cleaned = text
         
-        # Remove unwanted phrases
         for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
@@ -876,23 +1003,18 @@ Article:"""
                     cleaned = cleaned[:pos].strip()
                     break
         
-        # 🔥 REMOVE ALL SECTION HEADERS (comprehensive patterns)
+        # Remove section headers
         section_patterns = [
-            # Explicit headers with colons
             r'^\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
             r'\n\s*(?:Introduction|Background|Context|Main Details|Analysis|Impact|Conclusion|Summary|Overview)\s*:\s*',
-            # Headers with "and"
             r'^\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
             r'\n\s*(?:Background and Context|Analysis and Impact)\s*:\s*',
-            # Headers with "&"
-            r'^\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
-            r'\n\s*(?:Background & Context|Analysis & Impact)\s*:\s*',
         ]
         
         for pattern in section_patterns:
             cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
-        # 🔥 REMOVE REPETITIVE PHRASES
+        # Remove repetitive phrases
         repetitive_phrases = [
             r'^Industry experts note that\s+',
             r'\n\s*Industry experts note that\s+',
@@ -903,12 +1025,10 @@ Article:"""
         for pattern in repetitive_phrases:
             cleaned = re.sub(pattern, '\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
         
-        # Clean up formatting
+        # Clean formatting
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = re.sub(r'^\s*[-*•]\s+', '', cleaned, flags=re.MULTILINE)
         cleaned = cleaned.strip()
-        
-        logger.debug("🧹 Cleaned section headers, markers, and repetitive phrases")
         
         return cleaned
     
@@ -922,7 +1042,7 @@ Article:"""
             return False
     
     def _store_draft(self, news_id: int, workspace_id: int, draft: Dict) -> int:
-        """Store draft WITH local image path in HTML"""
+        """Store draft with local image path"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -963,8 +1083,6 @@ Article:"""
             draft_id = cursor.lastrowid
             conn.close()
             
-            logger.info(f"✅ Stored draft {draft_id}")
-            
             return draft_id
         
         except Exception as e:
@@ -972,9 +1090,7 @@ Article:"""
             return 0
     
     def _convert_to_html(self, text: str) -> str:
-        """
-        🔧 Convert text to clean HTML paragraphs
-        """
+        """Convert text to clean HTML paragraphs"""
         lines = text.split('\n')
         html_parts = []
         current_paragraph = []
@@ -988,7 +1104,6 @@ Article:"""
                     current_paragraph = []
                 continue
             
-            # Only convert explicit markdown headers
             if line.startswith('##'):
                 if current_paragraph:
                     html_parts.append(f"<p>{' '.join(current_paragraph)}</p>")
