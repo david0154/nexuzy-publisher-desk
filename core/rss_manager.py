@@ -25,6 +25,8 @@ import re
 import json
 import os
 from pathlib import Path
+import concurrent.futures
+import threading
 
 try:
     import feedparser
@@ -549,100 +551,42 @@ class RSSManager:
         img_ai = 0
         img_placeholder = 0
         
-        for feed_id, feed_name, feed_url, category in feeds:
-            try:
-                logger.info(f"📰 Fetching: {feed_name}")
-                
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                
-                try:
-                    response = requests.get(feed_url, headers=headers, timeout=10)
-                    feed = feedparser.parse(response.content)
-                except:
-                    feed = feedparser.parse(feed_url)
-                
-                if not feed.entries:
-                    logger.warning(f"⚠️ No entries in: {feed_url}")
-                    continue
-                
-                logger.info(f"✅ Found {len(feed.entries)} entries")
-                
-                for entry in feed.entries[:self.max_entries_per_feed]:
-                    try:
-                        headline = entry.get('title', '').strip()
-                        summary = entry.get('summary', entry.get('description', ''))
-                        
-                        if summary:
-                            soup = BeautifulSoup(summary, 'html.parser')
-                            summary = soup.get_text(separator=' ', strip=True)[:800]
-                        
-                        source_url = entry.get('link', '')
-                        
-                        if not headline or len(headline) < 10:
-                            continue
-                        
-                        publish_date = entry.get('published', entry.get('updated', datetime.now().isoformat()))
-                        
-                        if today_only and not self._is_today_news(publish_date):
-                            total_skipped += 1
-                            continue
-                        
-                        if self._check_duplicate_url(conn, workspace_id, source_url):
-                            total_skipped += 1
-                            continue
-                        
-                        if self._check_duplicate_headline(conn, workspace_id, headline):
-                            total_skipped += 1
-                            continue
-                        
-                        source_domain = urlparse(source_url).netloc if source_url else feed_name
-                        source_domain = source_domain.replace('www.', '')
-                        
-                        # ENHANCED IMAGE EXTRACTION
-                        image_url = self.extract_image_from_entry(entry, headline, category, feed_url)
-                        
-                        # Track source
-                        if image_url:
-                            if 'unsplash' in image_url.lower() or 'pixabay' in image_url.lower() or 'pexels' in image_url.lower():
-                                img_stock += 1
-                            elif 'perplexity' in str(image_url).lower():
-                                img_ai += 1
-                            else:
-                                img_rss += 1
-                        else:
-                            img_placeholder += 1
-                            image_url = placeholder_image
-                        
-                        cursor.execute('''
-                            INSERT INTO news_queue 
-                            (workspace_id, headline, summary, source_url, source_domain, 
-                             category, publish_date, status, image_url, fetched_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, CURRENT_TIMESTAMP)
-                        ''', (workspace_id, headline, summary, source_url, source_domain, 
-                              category or 'General', publish_date, image_url))
-                        
-                        total_fetched += 1
-                        
-                    except Exception as e:
-                        logger.error(f"❌ Error processing entry: {e}")
-                        continue
-                
-            except Exception as e:
-                logger.error(f"❌ Error fetching feed: {e}")
-                continue
+        # Process feeds concurrently for better performance
+        max_workers = min(4, len(feeds))  # Limit concurrent requests
         
-        conn.commit()
+        logger.info(f"🚀 Starting concurrent RSS feed processing with {max_workers} workers")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all feed processing tasks
+            future_to_feed = {
+                executor.submit(self._process_single_feed, feed_id, feed_name, feed_url, category, workspace_id, self.db_path, placeholder_image, today_only): 
+                (feed_id, feed_name) for feed_id, feed_name, feed_url, category in feeds
+            }
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_feed):
+                feed_id, feed_name = future_to_feed[future]
+                try:
+                    result = future.result()
+                    if result:
+                        fetched, skipped, rss_imgs, stock_imgs, ai_imgs, placeholder_imgs = result
+                        total_fetched += fetched
+                        total_skipped += skipped
+                        img_rss += rss_imgs
+                        img_stock += stock_imgs
+                        img_ai += ai_imgs
+                        img_placeholder += placeholder_imgs
+                        logger.info(f"✅ {feed_name}: {fetched} fetched, {skipped} skipped")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error processing feed {feed_name}: {e}")
+        
         conn.close()
         
-        result_msg = f"✅ Fetched {total_fetched} articles!\n"
-        result_msg += f"📷 RSS:{img_rss} | Stock:{img_stock} | AI:{img_ai} | Placeholder:{img_placeholder}"
-        if deleted_count > 0:
-            result_msg += f"\n🧹 Cleaned: {deleted_count}"
-        if total_skipped > 0:
-            result_msg += f"\n⏭️ Skipped: {total_skipped}"
+        stats = f"Fetched: {total_fetched}, Skipped: {total_skipped}, Images: RSS({img_rss}) Stock({img_stock}) AI({img_ai}) Placeholder({img_placeholder})"
+        logger.info(f"🎉 RSS fetch complete: {stats}")
         
-        logger.info(result_msg)
-        return total_fetched, result_msg
+        return total_fetched, stats
     
     def add_feed(self, workspace_id, feed_name, feed_url, category='General'):
         """Add RSS feed"""
@@ -726,3 +670,100 @@ class RSSManager:
             return count
         except:
             return 0
+    
+    def _process_single_feed(self, feed_id, feed_name, feed_url, category, workspace_id, db_path, placeholder_image, today_only):
+        """Process a single RSS feed (for concurrent processing)"""
+        local_fetched = 0
+        local_skipped = 0
+        local_rss_imgs = 0
+        local_stock_imgs = 0
+        local_ai_imgs = 0
+        local_placeholder_imgs = 0
+        
+        # Each thread gets its own database connection
+        conn = sqlite3.connect(db_path)
+        
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            
+            try:
+                response = requests.get(feed_url, headers=headers, timeout=15)
+                feed = feedparser.parse(response.content)
+            except:
+                feed = feedparser.parse(feed_url)
+            
+            if not feed.entries:
+                conn.close()
+                return (0, 0, 0, 0, 0, 0)
+            
+            for entry in feed.entries[:self.max_entries_per_feed]:
+                try:
+                    headline = entry.get('title', '').strip()
+                    summary = entry.get('summary', entry.get('description', ''))
+                    
+                    if summary:
+                        soup = BeautifulSoup(summary, 'html.parser')
+                        summary = soup.get_text(separator=' ', strip=True)[:800]
+                    
+                    source_url = entry.get('link', '')
+                    
+                    if not headline or len(headline) < 10:
+                        continue
+                    
+                    publish_date = entry.get('published', entry.get('updated', datetime.now().isoformat()))
+                    
+                    if today_only and not self._is_today_news(publish_date):
+                        local_skipped += 1
+                        continue
+                    
+                    if self._check_duplicate_url(conn, workspace_id, source_url):
+                        local_skipped += 1
+                        continue
+                    
+                    if self._check_duplicate_headline(conn, workspace_id, headline):
+                        local_skipped += 1
+                        continue
+                    
+                    source_domain = urlparse(source_url).netloc if source_url else feed_name
+                    
+                    # Extract image
+                    image_url = self.extract_image_from_entry(entry, headline, category, feed_url)
+                    
+                    if image_url:
+                        if 'unsplash' in image_url or 'pixabay' in image_url:
+                            local_stock_imgs += 1
+                        elif 'placeholder' in image_url:
+                            local_placeholder_imgs += 1
+                        else:
+                            local_rss_imgs += 1
+                    else:
+                        image_url = placeholder_image
+                        local_placeholder_imgs += 1
+                    
+                    # Insert news item
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO news_queue 
+                        (workspace_id, headline, summary, source_url, source_domain, image_url, category, publish_date, fetched_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        workspace_id, headline, summary, source_url, source_domain, 
+                        image_url, category, publish_date, datetime.now().isoformat()
+                    ))
+                    
+                    local_fetched += 1
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing entry: {e}")
+                    continue
+            
+            # Commit all inserts for this feed
+            conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Error processing feed {feed_name}: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+        
+        return (local_fetched, local_skipped, local_rss_imgs, local_stock_imgs, local_ai_imgs, local_placeholder_imgs)
