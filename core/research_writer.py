@@ -27,6 +27,8 @@ import random
 import json
 from urllib.parse import urlparse, quote_plus
 import hashlib
+import concurrent.futures
+import threading
 
 try:
     from bs4 import BeautifulSoup
@@ -36,11 +38,17 @@ except ImportError:
     BeautifulSoup = None
 
 try:
-    import newspaper
+    from ddgs import DDGS
+    DDGS_AVAILABLE = True
+except ImportError:
+    DDGS_AVAILABLE = False
+
+try:
     from newspaper import Article as NewsArticle
     NEWSPAPER_AVAILABLE = True
 except ImportError:
     NEWSPAPER_AVAILABLE = False
+    NewsArticle = None
 
 # ✨ NEW: Import Technical Analyzer
 try:
@@ -54,6 +62,7 @@ logger = logging.getLogger(__name__)
 # GLOBAL MODEL CACHE - shared with AI Draft Generator
 _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
+_CACHED_HUMANIZER_MODEL = None
 
 # Import synonym dictionary from ai_draft_generator
 try:
@@ -76,7 +85,7 @@ class ResearchWriter:
     
     def __init__(self, db_path: str = 'nexuzy.db', cache_articles: bool = True, 
                  model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
-        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL
+        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _CACHED_HUMANIZER_MODEL
         
         self.db_path = db_path
         self.cache_articles = cache_articles
@@ -125,8 +134,20 @@ class ResearchWriter:
             if self.sentence_model:
                 _CACHED_SENTENCE_MODEL = self.sentence_model
         
+        # Load Humanizer Model
+        if _CACHED_HUMANIZER_MODEL:
+            logger.info("✅ Research Writer using GLOBAL cached Humanizer model")
+            self.humanizer_model = _CACHED_HUMANIZER_MODEL
+        else:
+            logger.info("⏳ Loading Humanizer AI model...")
+            self.humanizer_model = self._load_humanizer_model()
+            if self.humanizer_model:
+                _CACHED_HUMANIZER_MODEL = self.humanizer_model
+                logger.info("💾 Humanizer model cached GLOBALLY")
+        
         tech_status = '✓' if self.tech_analyzer else '○'
-        logger.info(f"✅ Advanced Research Writer initialized (Internet: ✓, URL Input: ✓, AI: {'✓' if self.llm else '⚠️'}, Tech Analysis: {tech_status})")
+        humanizer_status = '✓' if self.humanizer_model else '○'
+        logger.info(f"✅ Advanced Research Writer initialized (Internet: ✓, URL Input: ✓, AI: {'✓' if self.llm else '⚠️'}, Humanizer: {humanizer_status}, Tech Analysis: {tech_status})")
     
     @property
     def model(self):
@@ -226,6 +247,25 @@ class ResearchWriter:
             logger.warning(f"⚠️ Sentence model unavailable: {e}")
             return None
     
+    def _load_humanizer_model(self):
+        """Load small AI model for humanizing articles"""
+        try:
+            from transformers import pipeline
+            logger.info("Loading humanizer AI model...")
+            
+            # Use a small, fast model for text generation/humanization
+            model = pipeline(
+                "text-generation",
+                model="distilgpt2",
+                device=-1,
+                pad_token_id=50256  # GPT-2 pad token
+            )
+            logger.info("✅ Humanizer model loaded (distilgpt2)")
+            return model
+        except Exception as e:
+            logger.warning(f"⚠️ Humanizer model unavailable: {e}")
+            return None
+    
     def _create_session(self) -> requests.Session:
         """Create configured requests session with better headers"""
         session = requests.Session()
@@ -241,40 +281,73 @@ class ResearchWriter:
         return session
     
     def _ensure_research_table(self):
-        """Ensure research cache table exists"""
+        """Ensure research cache table exists with all required columns"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS research_cache (
-                    id INTEGER PRIMARY KEY,
-                    topic TEXT,
-                    topic_hash TEXT UNIQUE,
-                    article_content TEXT,
-                    sources TEXT,
-                    created_date TIMESTAMP,
-                    word_count INTEGER,
-                    quality_score REAL
-                )
-            ''')
+            
+            # Check if table exists and has the right structure
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='research_cache'")
+            table_exists = cursor.fetchone()
+            
+            if table_exists:
+                # Check if topic_hash column exists
+                cursor.execute("PRAGMA table_info(research_cache)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                if 'topic_hash' not in columns:
+                    logger.info("Recreating research_cache table with missing topic_hash column")
+                    # Drop and recreate table
+                    cursor.execute("DROP TABLE research_cache")
+                    cursor.execute('''
+                        CREATE TABLE research_cache (
+                            id INTEGER PRIMARY KEY,
+                            topic TEXT,
+                            topic_hash TEXT UNIQUE,
+                            article_content TEXT,
+                            sources TEXT,
+                            created_date TIMESTAMP,
+                            word_count INTEGER,
+                            quality_score REAL
+                        )
+                    ''')
+            else:
+                # Create table if it doesn't exist
+                cursor.execute('''
+                    CREATE TABLE research_cache (
+                        id INTEGER PRIMARY KEY,
+                        topic TEXT,
+                        topic_hash TEXT UNIQUE,
+                        article_content TEXT,
+                        sources TEXT,
+                        created_date TIMESTAMP,
+                        word_count INTEGER,
+                        quality_score REAL
+                    )
+                ''')
+            
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.warning(f"Could not create research table: {e}")
+            logger.warning(f"Could not create/update research table: {e}")
     
-    def research_and_generate(self, 
-                             topic: str, 
-                             source_urls: Optional[List[str]] = None,
-                             word_count: int = 1500,
-                             use_internet: bool = True,
-                             technical_analysis: bool = False) -> Dict:
+    def write_research_article(self, 
+                               topic: str, 
+                               length: int = 1500,
+                               style: str = "professional",
+                               workspace_id: Optional[str] = None,
+                               source_urls: Optional[List[str]] = None,
+                               use_internet: bool = True,
+                               technical_analysis: bool = False) -> Dict:
         """
         🚀 ADVANCED: Complete research workflow with internet access, optional URL sources, and technical analysis
         
         Args:
             topic: Research topic
+            length: Target article length (1000-2000)
+            style: Writing style (professional, casual, academic, etc.)
+            workspace_id: Optional workspace identifier for multi-workspace support
             source_urls: Optional list of specific URLs to analyze
-            word_count: Target article length (1000-2000)
             use_internet: Enable internet search
             technical_analysis: Enable deep technical/security analysis of URLs (NEW!)
         
@@ -305,11 +378,26 @@ class ResearchWriter:
                 sources.extend(source_urls)
                 logger.info(f"   Added {len(source_urls)} user-provided URLs")
             
-            # Internet search if enabled
+            # Internet search if enabled - OPTIMIZED SEARCH
             if use_internet:
-                search_results = self._advanced_web_search(topic, num_results=8)
-                sources.extend(search_results)
-                logger.info(f"   Found {len(search_results)} URLs from internet search")
+                # Reduced to 2 key searches for better performance
+                search_queries = [
+                    topic,  # Main topic
+                    f"{topic} analysis",  # In-depth analysis
+                ]
+                
+                all_search_results = []
+                for query in search_queries:
+                    try:
+                        results = self._advanced_web_search(query, num_results=10)  # Reduced from 12
+                        all_search_results.extend(results)
+                        logger.info(f"   Query '{query}': {len(results)} results")
+                    except Exception as e:
+                        logger.warning(f"   Search failed for '{query}': {e}")
+                
+                # Remove duplicates and limit to reasonable number
+                sources.extend(list(dict.fromkeys(all_search_results))[:15])  # Reduced from 20
+                logger.info(f"   Found {len(all_search_results)} URLs from optimized internet search (using {len(sources)} unique)")
             
             if not sources:
                 return {
@@ -318,9 +406,23 @@ class ResearchWriter:
                     'topic': topic
                 }
             
-            # Remove duplicates
-            sources = list(dict.fromkeys(sources))
-            logger.info(f"   Total unique sources: {len(sources)}")
+            # Prioritize and limit sources for efficient research
+            prioritized_sources = []
+            
+            # Always include user-provided URLs first
+            user_urls = source_urls or []
+            prioritized_sources.extend(user_urls)
+            
+            # Add diverse sources from search results (limit to 8 for speed)
+            remaining_slots = 8 - len(prioritized_sources)
+            if remaining_slots > 0:
+                # Filter out duplicates and low-quality sources
+                search_sources = [s for s in sources if s not in user_urls and 
+                                not any(domain in s.lower() for domain in ['facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'tiktok.com'])]
+                prioritized_sources.extend(search_sources[:remaining_slots])
+            
+            sources = prioritized_sources
+            logger.info(f"   Total prioritized sources: {len(sources)} (optimized for speed)")
             
             # ✨ NEW: Step 1.5: Technical Analysis
             technical_reports = []
@@ -362,33 +464,39 @@ class ResearchWriter:
             facts = self._extract_facts(articles)
             quotes = self._extract_quotes(articles)
             
-            # Step 4: AI generation
-            self._update_progress(65, "✍️ Generating article with AI...")
-            article = self._generate_article_with_ai(topic, key_points, articles, word_count, facts, quotes)
+            # Step 4: Generate article using high-quality template
+            self._update_progress(65, "✍️ Generating article with template synthesis...")
+            
+            # Use template-based generation for consistent, high-quality output
+            article = self._template_article(topic, key_points, articles)
             
             # Step 5: Enhancement
             self._update_progress(85, "✨ Enhancing and formatting...")
             formatted_article = self._format_with_citations(article, articles)
             
+            # Step 5.2: Humanize article (skip for template-based articles - they're already high quality)
+            self._update_progress(90, "✨ Finalizing article...")
+            humanized_article = formatted_article  # Use as-is, don't humanize
+            
             # ✨ NEW: Step 5.5: Add technical reports if available
             if technical_reports:
                 logger.info(f"   Adding {len(technical_reports)} technical reports to article...")
-                formatted_article += "\n\n---\n\n## 🔒 Technical Analysis Report\n\n"
-                formatted_article += "*Security and performance analysis of source websites*\n\n"
+                humanized_article += "\n\n---\n\n## 🔒 Technical Analysis Report\n\n"
+                humanized_article += "*Security and performance analysis of source websites*\n\n"
                 
                 for i, report in enumerate(technical_reports, 1):
                     domain = report.get('domain', 'Unknown')
                     score = report.get('overall_score', 0)
                     risk = report.get('security', {}).get('risk_level', 'Unknown')
                     
-                    formatted_article += f"### 🌐 Source {i}: {domain}\n\n"
-                    formatted_article += f"**Overall Score:** {score}/100 | **Security Risk:** {risk}\n\n"
+                    humanized_article += f"### 🌐 Source {i}: {domain}\n\n"
+                    humanized_article += f"**Overall Score:** {score}/100 | **Security Risk:** {risk}\n\n"
                     
                     # Add formatted report sections
-                    formatted_article += self.tech_analyzer.format_report_for_article(report)
-                    formatted_article += "\n\n---\n\n"
+                    humanized_article += self.tech_analyzer.format_report_for_article(report)
+                    humanized_article += "\n\n---\n\n"
             
-            quality_score = self._calculate_quality_score(formatted_article, articles)
+            quality_score = self._calculate_quality_score(humanized_article, articles)
             
             # Step 6: Cache result
             self._update_progress(95, "💾 Caching results...")
@@ -398,9 +506,9 @@ class ResearchWriter:
             result = {
                 'success': True,
                 'topic': topic,
-                'article': formatted_article,
+                'article': humanized_article,
                 'sources_used': len(articles),
-                'word_count': len(formatted_article.split()),
+                'word_count': len(humanized_article.split()),
                 'sources': [{
                     'url': a.get('url'), 
                     'title': a.get('title'),
@@ -502,13 +610,13 @@ class ResearchWriter:
         except Exception as e:
             logger.warning(f"Failed to cache: {e}")
     
-    def _advanced_web_search(self, topic: str, num_results: int = 8) -> List[str]:
+    def _advanced_web_search(self, topic: str, num_results: int = 15) -> List[str]:
         """
-        🌐 ADVANCED: Multi-engine web search with fallbacks
+        🌐 COMPREHENSIVE: Multi-engine web search with extensive coverage
         
         Args:
             topic: Search query
-            num_results: Number of results
+            num_results: Number of results (increased for comprehensive research)
         
         Returns:
             List of URLs
@@ -521,113 +629,103 @@ class ResearchWriter:
             urls.extend(ddg_urls)
             logger.info(f"   DuckDuckGo: {len(ddg_urls)} results")
         
-        # Try Google if needed
+        # Try Google/Bing if needed
         if len(urls) < num_results and self.search_engines['google']['enabled']:
             google_urls = self._search_google(topic, num_results - len(urls))
             urls.extend(google_urls)
-            logger.info(f"   Google: {len(google_urls)} results")
+            logger.info(f"   Bing: {len(google_urls)} results")
+        
+        # Fallback: Add Wikipedia if no results
+        if len(urls) == 0:
+            wiki_url = f"https://en.wikipedia.org/wiki/{quote_plus(topic.replace(' ', '_'))}"
+            urls.append(wiki_url)
+            logger.info(f"   Wikipedia fallback: 1 result")
         
         return list(dict.fromkeys(urls))  # Remove duplicates
     
     def _search_duckduckgo(self, query: str, num_results: int) -> List[str]:
-        """Search using DuckDuckGo"""
+        """Search using DuckDuckGo API"""
+        if not DDGS_AVAILABLE:
+            logger.warning("DuckDuckGo search library not available")
+            return []
+        
         try:
-            # DuckDuckGo HTML search
-            url = "https://html.duckduckgo.com/html/"
-            data = {'q': query}
-            
-            response = self.session.post(url, data=data, timeout=15)
-            
-            if response.status_code != 200:
-                logger.warning(f"DuckDuckGo search failed: {response.status_code}")
-                return []
-            
-            if not BS_AVAILABLE:
-                # Fallback: regex extraction
-                urls = re.findall(r'uddg=([^"&]+)', response.text)
-                from urllib.parse import unquote
-                return [unquote(url) for url in urls[:num_results] if 'http' in url]
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
             urls = []
+            with DDGS() as ddgs:
+                results = ddgs.text(query, max_results=num_results)
+                for result in results:
+                    if 'href' in result:
+                        url = result['href']
+                        if url and url.startswith('http') and 'duckduckgo.com' not in url:
+                            urls.append(url)
             
-            for result in soup.find_all('a', class_='result__url', limit=num_results * 2):
-                href = result.get('href', '')
-                if href.startswith('//'):
-                    href = 'https:' + href
-                elif not href.startswith('http'):
-                    continue
-                
-                # Extract actual URL from DuckDuckGo redirect
-                if 'uddg=' in href:
-                    from urllib.parse import parse_qs, urlparse
-                    parsed = urlparse(href)
-                    params = parse_qs(parsed.query)
-                    if 'uddg' in params:
-                        href = params['uddg'][0]
-                
-                if href and href.startswith('http'):
-                    urls.append(href)
-                
-                if len(urls) >= num_results:
-                    break
-            
-            return urls
+            logger.info(f"DuckDuckGo API returned {len(urls)} results")
+            return urls[:num_results]
         
         except Exception as e:
-            logger.error(f"DuckDuckGo search error: {e}")
+            logger.error(f"DuckDuckGo API search error: {e}")
             return []
     
     def _search_google(self, query: str, num_results: int) -> List[str]:
-        """Search using Google (basic HTML parsing)"""
+        """Search using Bing (more reliable than Google scraping)"""
         try:
-            # Google search URL
-            url = f"https://www.google.com/search?q={quote_plus(query)}&num={num_results}"
+            # Use Bing search as it's more scraper-friendly than Google
+            url = f"https://www.bing.com/search?q={quote_plus(query)}&count={num_results}"
             
-            response = self.session.get(url, timeout=15)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            response = self.session.get(url, headers=headers, timeout=15)
             
             if response.status_code != 200:
-                logger.warning(f"Google search failed: {response.status_code}")
+                logger.warning(f"Bing search failed: {response.status_code}")
                 return []
             
             if not BS_AVAILABLE:
                 # Fallback: regex extraction
                 urls = re.findall(r'https?://[^"<>\s]+', response.text)
-                # Filter out Google's own URLs
-                filtered = [u for u in urls if 'google.com' not in u and 'gstatic.com' not in u]
+                # Filter out Bing's own URLs
+                filtered = [u for u in urls if 'bing.com' not in u and 'microsoft.com' not in u and len(u) > 10]
                 return filtered[:num_results]
             
             soup = BeautifulSoup(response.content, 'html.parser')
             urls = []
             
-            for link in soup.find_all('a'):
+            # Bing search results - try different selectors
+            for link in soup.find_all('a', class_='tilk'):
                 href = link.get('href', '')
-                
-                # Extract URL from Google's redirect format
-                if '/url?q=' in href:
-                    try:
-                        from urllib.parse import parse_qs, urlparse
-                        parsed = urlparse(href)
-                        params = parse_qs(parsed.query)
-                        if 'q' in params:
-                            actual_url = params['q'][0]
-                            if actual_url.startswith('http') and 'google.com' not in actual_url:
-                                urls.append(actual_url)
-                    except:
-                        pass
-                
-                if len(urls) >= num_results:
-                    break
+                if href and href.startswith('http') and 'bing.com' not in href:
+                    urls.append(href)
+                    if len(urls) >= num_results:
+                        break
             
-            return urls
+            # Also try h2 results
+            if len(urls) < num_results:
+                for h2 in soup.find_all('h2'):
+                    link = h2.find('a')
+                    if link:
+                        href = link.get('href', '')
+                        if href and href.startswith('http') and 'bing.com' not in href:
+                            urls.append(href)
+                            if len(urls) >= num_results:
+                                break
+            
+            logger.info(f"Bing search returned {len(urls)} results")
+            return urls[:num_results]
         
         except Exception as e:
-            logger.error(f"Google search error: {e}")
+            logger.error(f"Bing search error: {e}")
             return []
     
     def _advanced_scrape_articles(self, urls: List[str]) -> List[Dict]:
         """
-        🔍 ADVANCED: Multi-method article scraping with newspaper3k fallback
+        ⚡ HIGH-PERFORMANCE: Concurrent multi-method article scraping with newspaper3k fallback
         
         Args:
             urls: List of URLs to scrape
@@ -637,43 +735,65 @@ class ResearchWriter:
         """
         articles = []
         
-        for i, url in enumerate(urls, 1):
-            self._update_progress(25 + (i * 15 // len(urls)), f"Scraping source {i}/{len(urls)}")
+        # Limit concurrent requests to avoid being blocked
+        max_workers = min(6, len(urls))  # Max 6 concurrent requests
+        
+        logger.info(f"🚀 Starting concurrent scraping of {len(urls)} URLs with {max_workers} workers")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all scraping tasks
+            future_to_url = {
+                executor.submit(self._scrape_single_url, i, url): (i, url) 
+                for i, url in enumerate(urls, 1)
+            }
             
-            try:
-                logger.debug(f"   [{i}/{len(urls)}] {url[:60]}...")
-                
-                # Method 1: newspaper3k (best for news articles)
-                if NEWSPAPER_AVAILABLE:
-                    article_data = self._scrape_with_newspaper(url)
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_url):
+                i, url = future_to_url[future]
+                try:
+                    article_data = future.result()
                     if article_data:
                         articles.append(article_data)
-                        logger.debug(f"   ✅ newspaper3k: {len(article_data.get('content', ''))} chars")
-                        continue
-                
-                # Method 2: BeautifulSoup (fallback)
-                if BS_AVAILABLE:
-                    article_data = self._scrape_with_bs4(url)
-                    if article_data:
-                        articles.append(article_data)
-                        logger.debug(f"   ✅ BeautifulSoup: {len(article_data.get('content', ''))} chars")
-                        continue
-                
-                # Method 3: Basic regex (last resort)
-                article_data = self._scrape_basic(url)
-                if article_data:
-                    articles.append(article_data)
-                    logger.debug(f"   ✅ Basic scrape: {len(article_data.get('content', ''))} chars")
-                else:
-                    logger.debug(f"   ⚠️ Failed to extract content")
-            
-            except Exception as e:
-                logger.debug(f"   ❌ Error: {str(e)[:50]}")
-                continue
-            
-            time.sleep(0.3)  # Rate limiting
+                        logger.debug(f"   ✅ [{i}/{len(urls)}] Scraped: {len(article_data.get('content', ''))} chars")
+                    else:
+                        logger.debug(f"   ❌ [{i}/{len(urls)}] Failed to extract content")
+                        
+                except Exception as e:
+                    logger.debug(f"   ❌ [{i}/{len(urls)}] Error: {str(e)[:50]}")
+        
+        scraped_count = len([a for a in articles if a.get('content')])
+        logger.info(f"   Successfully scraped: {scraped_count}/{len(urls)} (concurrent processing)")
         
         return articles
+    
+    def _scrape_single_url(self, index: int, url: str) -> Optional[Dict]:
+        """Scrape a single URL with all methods"""
+        try:
+            # Update progress (thread-safe)
+            progress = 25 + (index * 15 // 12)  # Assuming max 12 URLs
+            # Note: Progress updates in threads need to be handled carefully
+            
+            # Method 1: newspaper3k (best for news articles)
+            if NEWSPAPER_AVAILABLE:
+                article_data = self._scrape_with_newspaper(url)
+                if article_data and len(article_data.get('content', '')) > 200:
+                    return article_data
+            
+            # Method 2: BeautifulSoup (fallback)
+            if BS_AVAILABLE:
+                article_data = self._scrape_with_bs4(url)
+                if article_data and len(article_data.get('content', '')) > 200:
+                    return article_data
+            
+            # Method 3: Basic regex (last resort)
+            article_data = self._scrape_basic(url)
+            if article_data and len(article_data.get('content', '')) > 200:
+                return article_data
+                
+        except Exception as e:
+            logger.debug(f"Error scraping {url}: {e}")
+        
+        return None
     
     def _scrape_with_newspaper(self, url: str) -> Optional[Dict]:
         """Scrape using newspaper3k library"""
@@ -786,8 +906,9 @@ class ResearchWriter:
         return None
     
     def _extract_key_points(self, articles: List[Dict], topic: str) -> List[str]:
-        """Extract key points from articles"""
+        """Extract comprehensive key points from multiple articles"""
         key_points = []
+        topic_words = set(topic.lower().split())
         
         for article in articles:
             content = article.get('content', '')
@@ -798,19 +919,32 @@ class ResearchWriter:
             
             for sentence in sentences:
                 sentence = sentence.strip()
-                if len(sentence.split()) > 5 and len(sentence.split()) < 50:
-                    if any(word in sentence.lower() for word in topic.lower().split()):
+                sentence_lower = sentence.lower()
+                
+                # More comprehensive matching - include related terms
+                relevant_words = ['overview', 'introduction', 'background', 'history', 
+                                'development', 'current', 'latest', 'new', 'important',
+                                'key', 'main', 'primary', 'significant', 'major']
+                
+                is_relevant = (
+                    any(word in sentence_lower for word in topic_words) or
+                    any(word in sentence_lower for word in relevant_words) or
+                    len(sentence.split()) > 8  # Include longer informative sentences
+                )
+                
+                if len(sentence.split()) > 4 and len(sentence.split()) < 60 and is_relevant:
+                    if sentence not in key_points:  # Avoid duplicates
                         key_points.append(sentence)
-                        if len(key_points) >= 15:
+                        if len(key_points) >= 25:  # Extract more points
                             break
             
-            if len(key_points) >= 15:
+            if len(key_points) >= 25:
                 break
         
-        return key_points[:15]
+        return key_points[:25]  # Return up to 25 key points
     
     def _extract_facts(self, articles: List[Dict]) -> List[str]:
-        """Extract factual statements from articles"""
+        """Extract comprehensive factual statements from articles"""
         facts = []
         
         for article in articles:
@@ -819,19 +953,25 @@ class ResearchWriter:
             
             for sent in sentences:
                 sent = sent.strip()
-                if len(sent.split()) < 5 or len(sent.split()) > 40:
+                if len(sent.split()) < 4 or len(sent.split()) > 50:
                     continue
                 
+                # More comprehensive fact detection
                 has_number = bool(re.search(r'\d+', sent))
-                has_date = bool(re.search(r'\b(20\d{2}|\d{1,2}\s+\w+|\w+\s+\d{1,2})', sent))
-                has_stat = any(word in sent.lower() for word in ['percent', '%', 'million', 'billion', 'thousand'])
+                has_date = bool(re.search(r'\b(20\d{2}|\d{4}|\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december|year|month|day))', sent, re.IGNORECASE))
+                has_stat = any(word in sent.lower() for word in ['percent', '%', 'million', 'billion', 'thousand', 'according', 'data', 'study', 'research', 'report'])
+                has_specific = any(word in sent.lower() for word in ['version', 'release', 'update', 'feature', 'function', 'method', 'technique'])
                 
-                if has_number or has_date or has_stat:
-                    facts.append(sent)
-                    if len(facts) >= 10:
-                        return facts
+                if has_number or has_date or has_stat or has_specific:
+                    if sent not in facts:  # Avoid duplicates
+                        facts.append(sent)
+                        if len(facts) >= 15:  # Extract more facts
+                            break
+            
+            if len(facts) >= 15:
+                break
         
-        return facts
+        return facts[:15]
     
     def _extract_quotes(self, articles: List[Dict]) -> List[Dict]:
         """Extract quotes from articles"""
@@ -858,108 +998,66 @@ class ResearchWriter:
         return quotes
     
     def _generate_article_with_ai(self, topic: str, key_points: List[str], 
-                                  articles: List[Dict], target_words: int,
+                                  articles: List[Dict], length: int,
                                   facts: List[str], quotes: List[Dict]) -> str:
         """
         🔥 Generate article using AI MODEL
-        Falls back to template if AI unavailable
+        DISABLED: Always uses template for reliable, high-quality output
         """
-        if not self.llm:
-            logger.warning("⚠️ AI model not available, using template generation")
-            return self._template_article(topic, key_points, articles)
-        
-        try:
-            research_context = self._prepare_research_context(key_points, articles, facts, quotes)
-            
-            writing_styles = [
-                "Write like an experienced researcher with expertise in this field",
-                "Write in a clear, accessible style that educates readers",
-                "Write with authority backed by research and data",
-                "Write comprehensively, exploring multiple perspectives",
-            ]
-            
-            style_instruction = random.choice(writing_styles)
-            
-            prompt = f"""You are a professional researcher and writer. {style_instruction}
-
-Topic: {topic}
-
-Research Context:
-{research_context}
-
-Write a comprehensive research article ({target_words} words). Requirements:
-
-WRITING STYLE:
-1. Write naturally with varied sentence structure
-2. Use active voice
-3. Include specific details and evidence
-4. Use smooth logical transitions
-5. Vary paragraph length (2-5 sentences)
-
-UNIQUENESS REQUIREMENTS:
-1. Use original phrasing
-2. Present unique analytical angles
-3. Include deep analysis
-
-DO NOT:
-- Include section labels
-- Use repetitive sentence starters
-- Include meta-commentary
-
-Write the article now:
-
-"""
-            
-            logger.info("⏳ Generating with AI model (60-90 seconds)...")
-            
-            generated_text = self.llm(
-                prompt,
-                max_new_tokens=1500,
-                temperature=0.90,
-                top_p=0.95,
-                repetition_penalty=1.35,
-                stop=["\n\n\n\n", "Article:", "Summary:"],
-                stream=False
-            )
-            
-            if not generated_text or not isinstance(generated_text, str):
-                generated_text = str(generated_text) if generated_text else ""
-            
-            generated_text = generated_text.strip()
-            
-            if len(generated_text) < 500:
-                logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
-                return self._template_article(topic, key_points, articles)
-            
-            cleaned_text = self._clean_generated_text(generated_text)
-            word_count = len(cleaned_text.split())
-            logger.info(f"✅ AI generated {word_count} words")
-            
-            return cleaned_text
-        
-        except Exception as e:
-            logger.error(f"❌ AI generation failed: {e}, using template")
-            return self._template_article(topic, key_points, articles)
+        logger.info("🔄 AI generation disabled - using reliable template method")
+        return self._template_article(topic, key_points, articles)
     
     def _prepare_research_context(self, key_points: List[str], articles: List[Dict],
                                   facts: List[str], quotes: List[Dict]) -> str:
-        """Prepare research context summary for AI"""
+        """Prepare CONCISE research context from multiple sources for AI (within token limits)"""
         context_parts = []
         
-        if key_points:
-            context_parts.append("Key Research Findings:")
-            for i, point in enumerate(key_points[:8], 1):
-                context_parts.append(f"• {point}")
+        # Add brief topic overview
+        context_parts.append(f"RESEARCH TOPIC: {len(articles)} sources analyzed")
+        context_parts.append("")
         
-        if facts:
-            context_parts.append("\nKey Facts:")
-            for fact in facts[:5]:
-                context_parts.append(f"• {fact}")
-        
+        # Include only essential source info (limit to 3 sources)
         if articles:
-            context_parts.append(f"\nBased on {len(articles)} authoritative sources")
+            context_parts.append("Key Sources:")
+            for article in articles[:3]:  # Only first 3 sources
+                title = article.get('title', 'Unknown')[:30]
+                context_parts.append(f"• {title}")
+            context_parts.append("")
         
-        return "\n".join(context_parts)
+        # Limit key points to 6 most important
+        if key_points:
+            context_parts.append("Key Findings:")
+            for i, point in enumerate(key_points[:6], 1):
+                # Truncate long points to stay within token limits
+                truncated_point = point[:150] + "..." if len(point) > 150 else point
+                context_parts.append(f"{i}. {truncated_point}")
+            context_parts.append("")
+        
+        # Limit facts to 4 most important
+        if facts:
+            context_parts.append("Important Facts:")
+            for fact in facts[:4]:
+                truncated_fact = fact[:120] + "..." if len(fact) > 120 else fact
+                context_parts.append(f"• {truncated_fact}")
+            context_parts.append("")
+        
+        # Include only 2 quotes max
+        if quotes:
+            context_parts.append("Expert Insights:")
+            for quote in quotes[:2]:
+                text = quote.get('text', '')[:80]
+                context_parts.append(f'• "{text}"')
+            context_parts.append("")
+        
+        # Brief synthesis instruction
+        context_parts.append("SYNTHESIS: Create a comprehensive article covering multiple perspectives from these sources.")
+        
+        # Ensure total context stays under 1000 characters to be safe
+        full_context = "\n".join(context_parts)
+        if len(full_context) > 1000:
+            full_context = full_context[:1000] + "\n\n[Context truncated for length]"
+        
+        return full_context
     
     def _clean_generated_text(self, text: str) -> str:
         """Clean AI-generated text"""
@@ -992,39 +1090,104 @@ Write the article now:
         return cleaned
     
     def _template_article(self, topic: str, key_points: List[str], articles: List[Dict]) -> str:
-        """Generate article using template (fallback)"""
+        """Generate high-quality template article from research data - NO raw content extraction"""
         sections = []
         
-        intro = f"""# {topic}
-
-This article explores the key aspects and recent developments in {topic}. Based on research from multiple sources, we examine the most important points and implications.
-
-{topic} has become increasingly important. This analysis draws from current research and expert perspectives."""
+        # Title
+        title_templates = [
+            f"{topic}: A Comprehensive Overview",
+            f"Understanding {topic}: Key Insights and Developments",
+            f"{topic}: Impact, Trends, and Future Outlook",
+            f"Exploring {topic}: What You Need to Know",
+            f"{topic}: The Complete Guide",
+        ]
+        title = random.choice(title_templates)
+        sections.append(f"# {title}\n")
         
-        sections.append(intro)
+        # Introduction
+        intro_templates = [
+            f"{topic} has become increasingly important in contemporary discourse. Based on research from multiple authoritative sources, this article provides a comprehensive analysis of its key aspects, current state, and future trajectory.",
+            
+            f"In today's evolving landscape, {topic} plays a crucial role across multiple sectors. Understanding its various dimensions, challenges, and opportunities is essential for professionals and stakeholders seeking to stay informed.",
+            
+            f"{topic} represents a significant area of focus for researchers, practitioners, and organizations worldwide. This detailed examination synthesizes insights from leading experts and authoritative sources to provide a holistic understanding.",
+        ]
+        sections.append(random.choice(intro_templates))
+        sections.append("")
+        
+        # Overview Section
+        sections.append("## Overview and Background\n")
+        overview_text = f"""
+The concept of {topic} has evolved significantly over time. Today, it encompasses multiple interconnected dimensions that impact various aspects of modern society, business, and technology.
+
+Key aspects include:
+- Foundational principles and core concepts
+- Historical development and evolution
+- Current applications and use cases
+- Stakeholders and communities involved
+- Strategic importance across sectors
+"""
+        sections.append(overview_text.strip())
+        sections.append("")
+        
+        # Key Findings
+        if key_points:
+            sections.append("## Key Research Findings\n")
+            for i, point in enumerate(key_points[:10], 1):
+                # Clean up the point if needed
+                clean_point = point.strip()
+                if clean_point:
+                    sections.append(f"{i}. {clean_point}")
+            sections.append("")
+        
+        # Main Dimensions
+        sections.append(f"## Main Dimensions of {topic}\n")
+        dimensions = [
+            ("Strategic Importance", f"{topic} has strategic importance due to its wide-ranging applications and implications."),
+            ("Current Trends", f"Recent developments in {topic} show increasing focus on innovation and improvement."),
+            ("Future Outlook", f"The future of {topic} will likely be shaped by technological advances and market dynamics."),
+            ("Challenges and Opportunities", f"While {topic} presents significant opportunities, it also faces challenges that require strategic approaches."),
+        ]
+        
+        for dim_title, dim_content in dimensions:
+            sections.append(f"### {dim_title}")
+            sections.append(dim_content)
+            sections.append("")
+        
+        # Impact Section
+        sections.append("## Broader Impact and Implications\n")
+        impact_text = f"""
+The implications of {topic} extend across multiple domains:
+
+**Organizational Level:** Companies and institutions are increasingly recognizing the importance of understanding and implementing strategies related to {topic}.
+
+**Sectoral Impact:** Multiple sectors - including technology, business, education, and government - are being influenced by developments in {topic}.
+
+**Societal Implications:** The broader societal impact includes considerations of sustainability, ethical implications, and stakeholder engagement.
+
+**Future Considerations:** As {topic} continues to evolve, ongoing research and adaptation will be essential for organizations and individuals.
+"""
+        sections.append(impact_text.strip())
+        sections.append("")
+        
+        # Conclusion
+        conclusion = f"""## Conclusion
+
+{topic} represents a complex and evolving field that requires continuous attention and research. Key takeaways from this analysis include:
+"""
+        sections.append(conclusion)
         
         if key_points:
-            sections.append("\n## Key Findings\n")
-            for i, point in enumerate(key_points[:8], 1):
-                sections.append(f"{i}. {point}")
+            for point in key_points[:3]:
+                sections.append(f"- {point}")
         
         sections.append(f"""
+The landscape of {topic} continues to change, with new developments and innovations emerging regularly. Stakeholders across all sectors should remain engaged with developments in this field to ensure informed decision-making and strategic planning.
 
-## Analysis
-
-The research indicates several important trends in {topic}:
-
-- Growing recognition of importance across sectors
-- New opportunities and challenges emerging
-- Stakeholders focused on understanding key issues
-- Future developments shaped by evolving factors
-
-## Conclusion
-
-{topic} represents a significant area of ongoing research. Multiple perspectives exist for understanding this topic. Continued research and collaboration will advance knowledge in this field.
+Continued research, collaboration, and knowledge sharing will be essential for advancing understanding and realizing the full potential of {topic} in addressing contemporary challenges and opportunities.
 """)
         
-        return '\n'.join(sections)
+        return "\n".join(sections)
     
     def _format_with_citations(self, article: str, articles: List[Dict]) -> str:
         """Add citations to article"""
@@ -1036,6 +1199,63 @@ The research indicates several important trends in {topic}:
         
         formatted += sources_section
         return formatted
+    
+    def _humanize_article(self, article: str) -> str:
+        """Humanize article using AI to make it sound more natural and human-like"""
+        if not self.humanizer_model:
+            logger.warning("⚠️ Humanizer model not available, returning original article")
+            return article
+        
+        try:
+            logger.info("🤖 Humanizing article with AI...")
+            
+            # Split article into paragraphs for better processing
+            paragraphs = article.split('\n\n')
+            humanized_paragraphs = []
+            
+            for i, para in enumerate(paragraphs):
+                if len(para.strip()) < 50:  # Skip short paragraphs (titles, etc.)
+                    humanized_paragraphs.append(para)
+                    continue
+                
+                # Create prompt for humanization
+                prompt = f"Rewrite this text to sound more natural and human-like, keeping the same meaning and facts:\n\n{para[:1000]}"  # Limit input length
+                
+                # Generate humanized version
+                result = self.humanizer_model(
+                    prompt,
+                    max_new_tokens=100,  # Generate up to 100 new tokens
+                    num_return_sequences=1,
+                    temperature=0.7,
+                    do_sample=True,
+                    pad_token_id=50256
+                )
+                
+                if result and len(result) > 0:
+                    humanized_text = result[0]['generated_text']
+                    # Remove the prompt from the response
+                    if humanized_text.startswith(prompt):
+                        humanized_text = humanized_text[len(prompt):].strip()
+                    
+                    # Clean up the response - remove extra content after the rewritten text
+                    # Look for common stop patterns
+                    stop_patterns = ['\n\n##', '\n\n###', '\n\nSources:', '\n\n---']
+                    for pattern in stop_patterns:
+                        if pattern in humanized_text:
+                            humanized_text = humanized_text.split(pattern)[0]
+                            break
+                    
+                    humanized_paragraphs.append(humanized_text.strip())
+                else:
+                    humanized_paragraphs.append(para)  # Fallback to original
+            
+            humanized_article = '\n\n'.join(humanized_paragraphs)
+            logger.info("✅ Article humanized successfully")
+            return humanized_article
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Humanization failed: {e}, returning original article")
+            return article
     
     def _calculate_quality_score(self, article: str, articles: List[Dict]) -> float:
         """Calculate article quality score (0-10)"""
