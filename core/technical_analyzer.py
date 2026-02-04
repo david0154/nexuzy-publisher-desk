@@ -7,6 +7,11 @@ Features:
 - 🔍 Technology stack detection
 - 📊 SEO & Accessibility audit
 - 🌐 Network & DNS analysis
+
+PERFORMANCE OPTIMIZED:
+- Global caching for analysis results (avoid re-analyzing same sites)
+- Concurrent processing for multiple checks
+- Reduced network timeouts
 """
 
 import logging
@@ -18,6 +23,8 @@ from urllib.parse import urlparse
 import re
 from datetime import datetime
 import json
+import concurrent.futures
+from functools import partial
 
 try:
     from bs4 import BeautifulSoup
@@ -27,9 +34,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# GLOBAL CACHE for analysis results - avoid re-analyzing same websites
+_ANALYSIS_CACHE = {}
 
 class TechnicalAnalyzer:
-    """Advanced technical analysis and security scanning for websites"""
+    """Advanced technical analysis and security scanning for websites - OPTIMIZED"""
     
     def __init__(self):
         self.session = self._create_session()
@@ -40,17 +49,24 @@ class TechnicalAnalyzer:
         logger.info("✅ Technical Analyzer initialized")
     
     def _create_session(self) -> requests.Session:
-        """Create configured session"""
+        """Create configured session with optimized settings"""
         session = requests.Session()
         session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         })
+        # OPTIMIZED: Shorter timeout for faster analysis
+        session.timeout = 10
         return session
     
     def analyze_website(self, url: str, deep_scan: bool = True) -> Dict:
         """
-        🔍 Complete technical analysis of website
+        🔍 Complete technical analysis of website - OPTIMIZED with caching
+        
+        Performance improvements:
+        - Global result caching (avoid re-analyzing same sites)
+        - Concurrent processing for multiple analysis types
+        - Reduced network timeouts
         
         Args:
             url: Website URL to analyze
@@ -59,12 +75,26 @@ class TechnicalAnalyzer:
         Returns:
             Comprehensive analysis report
         """
+        global _ANALYSIS_CACHE
+        
         logger.info(f"🔬 Starting technical analysis: {url}")
         
         parsed_url = urlparse(url)
         if not parsed_url.scheme:
             url = 'https://' + url
             parsed_url = urlparse(url)
+        
+        # Generate cache key
+        cache_key = f"{url}:{deep_scan}"
+        
+        # Check cache first (INSTANT return for repeated analysis)
+        if cache_key in _ANALYSIS_CACHE:
+            cached_result = _ANALYSIS_CACHE[cache_key]
+            # Check if cache is still fresh (24 hours)
+            cache_time = datetime.fromisoformat(cached_result.get('timestamp', '2000-01-01'))
+            if (datetime.now() - cache_time).total_seconds() < 86400:  # 24 hours
+                logger.info(f"✅ Using cached analysis for {url}")
+                return cached_result
         
         report = {
             'url': url,
@@ -80,35 +110,37 @@ class TechnicalAnalyzer:
         }
         
         try:
-            # 1. Security Analysis
-            logger.info("🔒 Security scanning...")
-            report['security'] = self._security_scan(url, deep_scan)
+            # OPTIMIZED: Concurrent analysis using ThreadPoolExecutor
+            logger.info("🚀 Running concurrent analysis...")
             
-            # 2. Performance Analysis
-            logger.info("⚡ Performance testing...")
-            report['performance'] = self._performance_analysis(url)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                # Submit analysis tasks
+                security_future = executor.submit(self._security_scan, url, deep_scan)
+                performance_future = executor.submit(self._performance_analysis, url)
+                tech_future = executor.submit(self._detect_technologies, url)
+                seo_future = executor.submit(self._seo_analysis, url)
+                accessibility_future = executor.submit(self._accessibility_check, url)
+                
+                # Collect results
+                report['security'] = security_future.result()
+                report['performance'] = performance_future.result()
+                report['technologies'] = tech_future.result()
+                report['seo'] = seo_future.result()
+                report['accessibility'] = accessibility_future.result()
             
-            # 3. Technology Detection
-            logger.info("🔍 Detecting technologies...")
-            report['technologies'] = self._detect_technologies(url)
-            
-            # 4. SEO Analysis
-            logger.info("📊 SEO audit...")
-            report['seo'] = self._seo_analysis(url)
-            
-            # 5. Accessibility Check
-            logger.info("♿ Accessibility check...")
-            report['accessibility'] = self._accessibility_check(url)
-            
-            # 6. Bug Detection
+            # Bug detection (depends on other results)
             logger.info("🐛 Bug detection...")
             report['bugs'] = self._detect_bugs(url, report)
             
-            # 7. Generate Recommendations
+            # Generate Recommendations
             report['recommendations'] = self._generate_recommendations(report)
             
             # Calculate overall score
             report['overall_score'] = self._calculate_score(report)
+            
+            # Cache the result
+            _ANALYSIS_CACHE[cache_key] = report
+            logger.debug(f"💾 Cached analysis result for {url}")
             
             logger.info(f"✅ Analysis complete | Score: {report['overall_score']}/100")
             return report
@@ -671,3 +703,15 @@ class TechnicalAnalyzer:
                 sections.append(f"- {rec}")
         
         return '\n'.join(sections)
+    
+    def clear_cache(self):
+        """Clear the analysis cache to free memory"""
+        global _ANALYSIS_CACHE
+        cache_size = len(_ANALYSIS_CACHE)
+        _ANALYSIS_CACHE.clear()
+        logger.info(f"🗑️ Cleared {cache_size} cached website analyses")
+    
+    def get_cache_size(self) -> int:
+        """Get number of cached website analyses"""
+        global _ANALYSIS_CACHE
+        return len(_ANALYSIS_CACHE)
