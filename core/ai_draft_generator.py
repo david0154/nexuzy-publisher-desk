@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 _CACHED_MODEL = None
 _CACHED_SENTENCE_MODEL = None
 _GRAMMAR_CHECKER = None
+_HUMANIZER_INSTANCE = None  # Cache humanizer instance
 
 # Enhanced synonym dictionary for uniqueness
 SYNONYM_DICT = {
@@ -114,7 +115,7 @@ class DraftGenerator:
     """Generate HUMAN-LIKE AI-rewritten articles (450-2500 words, 95%+ human score)"""
     
     def __init__(self, db_path: str, model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
-        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _GRAMMAR_CHECKER
+        global _CACHED_MODEL, _CACHED_SENTENCE_MODEL, _GRAMMAR_CHECKER, _HUMANIZER_INSTANCE
         
         self.db_path = db_path
         self.model_name = model_name
@@ -151,19 +152,24 @@ class DraftGenerator:
             if self.grammar_checker:
                 _GRAMMAR_CHECKER = self.grammar_checker
         
+        # Cache humanizer instance for performance
+        if _HUMANIZER_INSTANCE:
+            logger.info("✅ Using cached Humanizer instance")
+            self.humanizer = _HUMANIZER_INSTANCE
+        else:
+            logger.info("⏳ Initializing Humanizer for AI detection bypass...")
+            try:
+                self.humanizer = AIHumanizer()
+                _HUMANIZER_INSTANCE = self.humanizer
+                logger.info("✅ Humanizer cached globally")
+            except Exception as e:
+                logger.warning(f"⚠️ Humanizer initialization failed: {e}")
+                self.humanizer = None
+        
         if not self.llm:
             logger.error("❌ AI Writer FAILED - GGUF model not found")
         else:
             logger.info("✅ AI Writer LOADED (450-2500 words, 95%+ Human-Like, Enhanced Sentence Model)")
-    
-            # 🎯 Initialize AI Humanizer
-        try:
-            logger.info("⏳ Loading AI Humanizer...")
-            self.humanizer = AIHumanizer()
-            logger.info("✅ AI Humanizer loaded")
-        except Exception as e:
-            logger.warning(f"⚠️  AI Humanizer unavailable: {e}")
-            self.humanizer = None
     
     def _load_grammar_checker(self):
         """Load grammar and spelling checker"""
@@ -423,14 +429,34 @@ class DraftGenerator:
             from transformers import pipeline
             logger.info("⏳ Loading Sentence Model (flan-t5-base) for human-like refinement...")
             
-            model = pipeline(
-                "text2text-generation",
-                model="google/flan-t5-base",
-                max_length=200,
-                device=-1  # CPU mode
-            )
-            logger.info("✅ Sentence Model loaded (flan-t5-base)")
-            return model
+            # Try different pipeline tasks for compatibility
+            for task in ["text2text-generation", "text-generation"]:
+                try:
+                    model = pipeline(
+                        task,
+                        model="google/flan-t5-base",
+                        max_length=200,
+                        device=-1  # CPU mode
+                    )
+                    logger.info(f"✅ Sentence Model loaded (flan-t5-base) with task: {task}")
+                    return model
+                except Exception as task_error:
+                    logger.debug(f"Task {task} failed: {task_error}")
+                    continue
+            
+            # If both tasks fail, try without specifying task
+            try:
+                model = pipeline(
+                    model="google/flan-t5-base",
+                    max_length=200,
+                    device=-1  # CPU mode
+                )
+                logger.info("✅ Sentence Model loaded (flan-t5-base) with auto-detected task")
+                return model
+            except Exception as e:
+                logger.warning(f"⚠️  Sentence model loading failed: {e}")
+                return None
+                
         except ImportError:
             logger.warning("⚠️  transformers not installed. Run: pip install transformers torch")
             return None
