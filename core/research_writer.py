@@ -1,5 +1,7 @@
 """
 Advanced Research Writer Module - AI-Powered Deep Research & Article Generation
+✨ NOW WITH TECHNICAL ANALYSIS INTEGRATION
+
 Features: 
 - 🌐 Internet search integration (DuckDuckGo, Google)
 - 📎 Optional URL source input
@@ -8,6 +10,9 @@ Features:
 - 📊 Live progress tracking
 - 💾 Intelligent caching
 - 🔗 Auto-citation generation
+- 🔒 Security & technical analysis (NEW!)
+- 🐛 Bug detection & reporting (NEW!)
+- ⚡ Performance metrics (NEW!)
 """
 
 import logging
@@ -37,6 +42,13 @@ try:
 except ImportError:
     NEWSPAPER_AVAILABLE = False
 
+# ✨ NEW: Import Technical Analyzer
+try:
+    from core.technical_analyzer import TechnicalAnalyzer
+    TECH_ANALYZER_AVAILABLE = True
+except ImportError:
+    TECH_ANALYZER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # GLOBAL MODEL CACHE - shared with AI Draft Generator
@@ -60,7 +72,7 @@ except:
     TITLE_PATTERNS = ["{topic}: What This Means", "{topic}: Analysis"]
 
 class ResearchWriter:
-    """Advanced AI-powered research and article generation engine with internet access"""
+    """Advanced AI-powered research and article generation engine with internet access and technical analysis"""
     
     def __init__(self, db_path: str = 'nexuzy.db', cache_articles: bool = True, 
                  model_name: str = 'models/mistral-7b-instruct-v0.2.Q4_K_M.gguf'):
@@ -72,6 +84,18 @@ class ResearchWriter:
         self.session = self._create_session()
         self.model_name = model_name
         self._ensure_research_table()
+        
+        # ✨ NEW: Initialize Technical Analyzer
+        if TECH_ANALYZER_AVAILABLE:
+            try:
+                self.tech_analyzer = TechnicalAnalyzer()
+                logger.info("✅ Technical Analyzer enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Technical Analyzer initialization failed: {e}")
+                self.tech_analyzer = None
+        else:
+            self.tech_analyzer = None
+            logger.info("ℹ️ Technical Analyzer not available (optional feature)")
         
         # Progress tracking
         self.progress_callback = None
@@ -101,7 +125,8 @@ class ResearchWriter:
             if self.sentence_model:
                 _CACHED_SENTENCE_MODEL = self.sentence_model
         
-        logger.info(f"✅ Advanced Research Writer initialized (Internet: ✓, URL Input: ✓, AI: {'✓' if self.llm else '⚠️'})")
+        tech_status = '✓' if self.tech_analyzer else '○'
+        logger.info(f"✅ Advanced Research Writer initialized (Internet: ✓, URL Input: ✓, AI: {'✓' if self.llm else '⚠️'}, Tech Analysis: {tech_status})")
     
     @property
     def model(self):
@@ -241,21 +266,23 @@ class ResearchWriter:
                              topic: str, 
                              source_urls: Optional[List[str]] = None,
                              word_count: int = 1500,
-                             use_internet: bool = True) -> Dict:
+                             use_internet: bool = True,
+                             technical_analysis: bool = False) -> Dict:
         """
-        🚀 ADVANCED: Complete research workflow with internet access and optional URL sources
+        🚀 ADVANCED: Complete research workflow with internet access, optional URL sources, and technical analysis
         
         Args:
             topic: Research topic
-            source_urls: Optional list of specific URLs to analyze (NEW!)
+            source_urls: Optional list of specific URLs to analyze
             word_count: Target article length (1000-2000)
-            use_internet: Enable internet search (NEW!)
+            use_internet: Enable internet search
+            technical_analysis: Enable deep technical/security analysis of URLs (NEW!)
         
         Returns:
-            Dict with generated article and comprehensive metadata
+            Dict with generated article, metadata, and optional technical reports
         """
         logger.info(f"🔬 Starting ADVANCED research for: {topic}")
-        logger.info(f"   Internet: {'✓' if use_internet else '✗'} | URL Sources: {len(source_urls) if source_urls else 0}")
+        logger.info(f"   Internet: {'✓' if use_internet else '✗'} | URL Sources: {len(source_urls) if source_urls else 0} | Tech Analysis: {'✓' if technical_analysis else '✗'}")
         start_time = time.time()
         
         # Generate cache key
@@ -295,6 +322,27 @@ class ResearchWriter:
             sources = list(dict.fromkeys(sources))
             logger.info(f"   Total unique sources: {len(sources)}")
             
+            # ✨ NEW: Step 1.5: Technical Analysis
+            technical_reports = []
+            if technical_analysis and self.tech_analyzer:
+                self._update_progress(15, "🔒 Running technical analysis...")
+                urls_to_analyze = sources[:3]  # Analyze first 3 URLs
+                logger.info(f"   Analyzing {len(urls_to_analyze)} URLs for security & performance...")
+                
+                for idx, url in enumerate(urls_to_analyze, 1):
+                    try:
+                        logger.info(f"   [{idx}/{len(urls_to_analyze)}] Analyzing: {url[:60]}...")
+                        tech_report = self.tech_analyzer.analyze_website(url, deep_scan=True)
+                        if tech_report and tech_report.get('overall_score'):
+                            technical_reports.append(tech_report)
+                            logger.info(f"      Score: {tech_report.get('overall_score')}/100 | Risk: {tech_report.get('security', {}).get('risk_level', 'Unknown')}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Technical analysis failed for {url}: {str(e)[:50]}")
+                
+                logger.info(f"   ✅ Completed technical analysis on {len(technical_reports)} URLs")
+            elif technical_analysis and not self.tech_analyzer:
+                logger.warning("   ⚠️ Technical analysis requested but TechnicalAnalyzer not available")
+            
             # Step 2: Advanced scraping
             self._update_progress(25, f"📰 Scraping {len(sources)} sources...")
             articles = self._advanced_scrape_articles(sources)
@@ -321,6 +369,25 @@ class ResearchWriter:
             # Step 5: Enhancement
             self._update_progress(85, "✨ Enhancing and formatting...")
             formatted_article = self._format_with_citations(article, articles)
+            
+            # ✨ NEW: Step 5.5: Add technical reports if available
+            if technical_reports:
+                logger.info(f"   Adding {len(technical_reports)} technical reports to article...")
+                formatted_article += "\n\n---\n\n## 🔒 Technical Analysis Report\n\n"
+                formatted_article += "*Security and performance analysis of source websites*\n\n"
+                
+                for i, report in enumerate(technical_reports, 1):
+                    domain = report.get('domain', 'Unknown')
+                    score = report.get('overall_score', 0)
+                    risk = report.get('security', {}).get('risk_level', 'Unknown')
+                    
+                    formatted_article += f"### 🌐 Source {i}: {domain}\n\n"
+                    formatted_article += f"**Overall Score:** {score}/100 | **Security Risk:** {risk}\n\n"
+                    
+                    # Add formatted report sections
+                    formatted_article += self.tech_analyzer.format_report_for_article(report)
+                    formatted_article += "\n\n---\n\n"
+            
             quality_score = self._calculate_quality_score(formatted_article, articles)
             
             # Step 6: Cache result
@@ -345,6 +412,8 @@ class ResearchWriter:
                 'quotes_count': len(quotes),
                 'internet_used': use_internet,
                 'user_urls': len(source_urls) if source_urls else 0,
+                'technical_reports': technical_reports if technical_reports else None,
+                'technical_analysis_count': len(technical_reports) if technical_reports else 0,
                 'status': '✅ Advanced research article generated successfully'
             }
             
@@ -354,6 +423,8 @@ class ResearchWriter:
             
             self._update_progress(100, "✅ Complete!")
             logger.info(f"✅ Generated {result['word_count']} words | Quality: {quality_score:.1f}/10 | Time: {elapsed:.1f}s")
+            if technical_reports:
+                logger.info(f"   🔒 Technical reports: {len(technical_reports)} URLs analyzed")
             return result
         
         except Exception as e:
