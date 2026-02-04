@@ -103,6 +103,11 @@ class ResearchWriter:
         
         logger.info(f"✅ Advanced Research Writer initialized (Internet: ✓, URL Input: ✓, AI: {'✓' if self.llm else '⚠️'})")
     
+    @property
+    def model(self):
+        """Compatibility property: returns self.llm for code checking .model attribute"""
+        return self.llm
+    
     def set_progress_callback(self, callback):
         """Set callback for progress updates"""
         self.progress_callback = callback
@@ -765,7 +770,7 @@ class ResearchWriter:
             content = article.get('content', '')
             
             # Find quoted text
-            quote_matches = re.findall(r'[""""]([^"""]{20,200})[""""]', content)
+            quote_matches = re.findall(r'["\"\""]([^\"\"\"]{20,200})["\"\""]', content)
             
             for quote_text in quote_matches:
                 quote_text = quote_text.strip()
