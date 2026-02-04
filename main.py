@@ -363,6 +363,8 @@ class NexuzyPublisherApp(tk.Tk):
         try:
             from core.research_writer import ResearchWriter
             self.research_writer = ResearchWriter(self.db_path)
+            # Set progress callback for UI updates
+            self.research_writer.set_progress_callback(self.update_research_progress)
             self.models_status['research_writer'] = 'Available' if self.research_writer.model else 'Not Available'
             logger.info("[OK] Research Writer")
         except Exception as e:
@@ -964,45 +966,75 @@ class NexuzyPublisherApp(tk.Tk):
         
         threading.Thread(target=research_thread, daemon=True).start()
     
+    def update_research_progress(self, progress: int, status: str):
+        """Update research progress in UI"""
+        self.after(0, lambda: self.research_progress.config(text=f"[{progress}%] {status}"))
+    
     def _research_complete(self, article):
         """Handle completed research article"""
-        if not article or not article.get('content'):
+        if not article or not article.get('success') or not article.get('article'):
             messagebox.showerror("Error", "Failed to generate research article")
             return
-        
+
         self.research_output.delete('1.0', tk.END)
-        
+
         # Format output nicely
-        output = f"TITLE: {article.get('title', 'Untitled')}\n"
+        output = f"TITLE: {article.get('topic', 'Untitled')}\n"
         output += f"{'=' * 80}\n\n"
-        
-        if article.get('summary'):
-            output += f"SUMMARY:\n{article['summary']}\n\n{'=' * 80}\n\n"
-        
-        output += f"{article['content']}\n\n"
-        
+
+        # Add quality score and stats
+        if article.get('quality_score'):
+            output += f"QUALITY SCORE: {article['quality_score']:.1f}/10\n"
+        if article.get('word_count'):
+            output += f"WORD COUNT: {article['word_count']}\n"
+        if article.get('sources_used'):
+            output += f"SOURCES ANALYZED: {article['sources_used']}\n"
+        if article.get('generation_time'):
+            output += f"GENERATION TIME: {article['generation_time']}\n"
+        output += f"{'=' * 80}\n\n"
+
+        # Main article content
+        output += f"{article['article']}\n\n"
+
+        # Add sources section
         if article.get('sources'):
             output += f"\n{'=' * 80}\n"
-            output += f"SOURCES & REFERENCES:\n"
+            output += f"SOURCES & REFERENCES:\n\n"
             for i, source in enumerate(article['sources'], 1):
-                output += f"{i}. {source}\n"
-        
-        if article.get('fact_checks'):
+                title = source.get('title', 'Unknown Source')
+                url = source.get('url', '#')
+                credibility = source.get('credibility', 0.5)
+                cred_text = f" (Credibility: {credibility:.1f})" if credibility else ""
+                output += f"{i}. {title}{cred_text}\n   {url}\n\n"
+
+        # Add technical reports if available
+        if article.get('technical_reports'):
             output += f"\n{'=' * 80}\n"
-            output += f"FACT CHECKS:\n"
-            for check in article['fact_checks']:
-                output += f"• {check}\n"
-        
+            output += f"TECHNICAL ANALYSIS REPORTS:\n\n"
+            for i, report in enumerate(article['technical_reports'], 1):
+                domain = report.get('domain', 'Unknown')
+                score = report.get('overall_score', 0)
+                risk = report.get('security', {}).get('risk_level', 'Unknown')
+                output += f"🔒 Report {i}: {domain}\n"
+                output += f"   Overall Score: {score}/100 | Security Risk: {risk}\n\n"
+
         self.research_output.insert(tk.END, output)
+        self.current_research_article = article
+        word_count = article.get('word_count', 0)
+        source_count = len(article.get('sources', []))
+        tech_count = article.get('technical_analysis_count', 0)
+
+        status_msg = f"✅ Research complete! Generated {word_count} words from {source_count} sources."
+        if tech_count > 0:
+            status_msg += f" Technical analysis: {tech_count} sites analyzed."
+        self.research_progress.config(text=status_msg)
+        self.update_status(f"Research complete: {word_count} words", 'success')
+
+        quality = article.get('quality_score', 0)
+        messagebox.showinfo("Success", f"Research article generated!\n\n📊 Quality Score: {quality:.1f}/10\n📝 Words: {word_count}\n🔍 Sources: {source_count}\n⏱️ Time: {article.get('generation_time', 'Unknown')}")
         
         # Store for saving
         self.current_research_article = article
-        
-        word_count = len(article['content'].split())
-        self.research_progress.config(text=f"✅ Research complete! Generated {word_count} words with {len(article.get('sources', []))} sources.")
-        self.update_status(f"Research complete: {word_count} words", 'success')
-        
-        messagebox.showinfo("Success", f"Research article generated!\n\nWords: {word_count}\nSources: {len(article.get('sources', []))}\nFact checks: {len(article.get('fact_checks', []))}")
     
     def _research_error(self, error):
         """Handle research error"""
@@ -1022,13 +1054,15 @@ class NexuzyPublisherApp(tk.Tk):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            word_count = len(article['content'].split())
+            word_count = article.get('word_count', 0)
+            title = article.get('topic', 'Research Article')
+            content = article.get('article', '')
+            summary = f"Research article on {title} - {word_count} words, {len(article.get('sources', []))} sources"
             
             cursor.execute('''
                 INSERT INTO ai_drafts (workspace_id, title, body_draft, summary, word_count)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (self.current_workspace_id, article['title'], article['content'], 
-                  article.get('summary', ''), word_count))
+            ''', (self.current_workspace_id, title, content, summary, word_count))
             
             draft_id = cursor.lastrowid
             conn.commit()
