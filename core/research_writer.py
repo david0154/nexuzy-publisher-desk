@@ -262,34 +262,6 @@ class ResearchWriter:
         except Exception as e:
             logger.warning(f"Could not create research table: {e}")
     
-    def write_research_article(self, topic: str, source_urls: Optional[List[str]] = None, 
-                              word_count: int = 1500, use_internet: bool = True,
-                              technical_analysis: bool = False) -> Dict:
-        """
-        🔥 GUI COMPATIBILITY METHOD - Alias for research_and_generate()
-        
-        This method exists for backward compatibility with the GUI that calls write_research_article().
-        It simply forwards all parameters to research_and_generate().
-        
-        Args:
-            topic: Research topic
-            source_urls: Optional list of specific URLs to analyze
-            word_count: Target article length
-            use_internet: Enable internet search
-            technical_analysis: Enable technical/security analysis
-        
-        Returns:
-            Same as research_and_generate()
-        """
-        logger.info("📝 write_research_article() called (forwarding to research_and_generate)")
-        return self.research_and_generate(
-            topic=topic,
-            source_urls=source_urls,
-            word_count=word_count,
-            use_internet=use_internet,
-            technical_analysis=technical_analysis
-        )
-    
     def research_and_generate(self, 
                              topic: str, 
                              source_urls: Optional[List[str]] = None,
@@ -530,70 +502,108 @@ class ResearchWriter:
         except Exception as e:
             logger.warning(f"Failed to cache: {e}")
     
-    # [REST OF THE METHODS - keeping them exactly as they are]
-    # I'll add a shortened version here to keep within token limits
-    # The actual file will have all methods
-    
     def _advanced_web_search(self, topic: str, num_results: int = 8) -> List[str]:
+        """
+        🌐 ADVANCED: Multi-engine web search with fallbacks
+        
+        Args:
+            topic: Search query
+            num_results: Number of results
+        
+        Returns:
+            List of URLs
+        """
         urls = []
+        
+        # Try DuckDuckGo first
         if self.search_engines['duckduckgo']['enabled']:
             ddg_urls = self._search_duckduckgo(topic, num_results)
             urls.extend(ddg_urls)
             logger.info(f"   DuckDuckGo: {len(ddg_urls)} results")
+        
+        # Try Google if needed
         if len(urls) < num_results and self.search_engines['google']['enabled']:
             google_urls = self._search_google(topic, num_results - len(urls))
             urls.extend(google_urls)
             logger.info(f"   Google: {len(google_urls)} results")
-        return list(dict.fromkeys(urls))
+        
+        return list(dict.fromkeys(urls))  # Remove duplicates
     
     def _search_duckduckgo(self, query: str, num_results: int) -> List[str]:
+        """Search using DuckDuckGo"""
         try:
+            # DuckDuckGo HTML search
             url = "https://html.duckduckgo.com/html/"
             data = {'q': query}
+            
             response = self.session.post(url, data=data, timeout=15)
+            
             if response.status_code != 200:
+                logger.warning(f"DuckDuckGo search failed: {response.status_code}")
                 return []
+            
             if not BS_AVAILABLE:
+                # Fallback: regex extraction
                 urls = re.findall(r'uddg=([^"&]+)', response.text)
                 from urllib.parse import unquote
                 return [unquote(url) for url in urls[:num_results] if 'http' in url]
+            
             soup = BeautifulSoup(response.content, 'html.parser')
             urls = []
+            
             for result in soup.find_all('a', class_='result__url', limit=num_results * 2):
                 href = result.get('href', '')
                 if href.startswith('//'):
                     href = 'https:' + href
                 elif not href.startswith('http'):
                     continue
+                
+                # Extract actual URL from DuckDuckGo redirect
                 if 'uddg=' in href:
                     from urllib.parse import parse_qs, urlparse
                     parsed = urlparse(href)
                     params = parse_qs(parsed.query)
                     if 'uddg' in params:
                         href = params['uddg'][0]
+                
                 if href and href.startswith('http'):
                     urls.append(href)
+                
                 if len(urls) >= num_results:
                     break
+            
             return urls
+        
         except Exception as e:
             logger.error(f"DuckDuckGo search error: {e}")
             return []
     
     def _search_google(self, query: str, num_results: int) -> List[str]:
+        """Search using Google (basic HTML parsing)"""
         try:
+            # Google search URL
             url = f"https://www.google.com/search?q={quote_plus(query)}&num={num_results}"
+            
             response = self.session.get(url, timeout=15)
+            
             if response.status_code != 200:
+                logger.warning(f"Google search failed: {response.status_code}")
                 return []
+            
             if not BS_AVAILABLE:
+                # Fallback: regex extraction
                 urls = re.findall(r'https?://[^"<>\s]+', response.text)
+                # Filter out Google's own URLs
                 filtered = [u for u in urls if 'google.com' not in u and 'gstatic.com' not in u]
                 return filtered[:num_results]
+            
             soup = BeautifulSoup(response.content, 'html.parser')
             urls = []
+            
             for link in soup.find_all('a'):
                 href = link.get('href', '')
+                
+                # Extract URL from Google's redirect format
                 if '/url?q=' in href:
                     try:
                         from urllib.parse import parse_qs, urlparse
@@ -605,43 +615,76 @@ class ResearchWriter:
                                 urls.append(actual_url)
                     except:
                         pass
+                
                 if len(urls) >= num_results:
                     break
+            
             return urls
+        
         except Exception as e:
             logger.error(f"Google search error: {e}")
             return []
     
     def _advanced_scrape_articles(self, urls: List[str]) -> List[Dict]:
+        """
+        🔍 ADVANCED: Multi-method article scraping with newspaper3k fallback
+        
+        Args:
+            urls: List of URLs to scrape
+        
+        Returns:
+            List of article dicts with metadata
+        """
         articles = []
+        
         for i, url in enumerate(urls, 1):
             self._update_progress(25 + (i * 15 // len(urls)), f"Scraping source {i}/{len(urls)}")
+            
             try:
+                logger.debug(f"   [{i}/{len(urls)}] {url[:60]}...")
+                
+                # Method 1: newspaper3k (best for news articles)
                 if NEWSPAPER_AVAILABLE:
                     article_data = self._scrape_with_newspaper(url)
                     if article_data:
                         articles.append(article_data)
+                        logger.debug(f"   ✅ newspaper3k: {len(article_data.get('content', ''))} chars")
                         continue
+                
+                # Method 2: BeautifulSoup (fallback)
                 if BS_AVAILABLE:
                     article_data = self._scrape_with_bs4(url)
                     if article_data:
                         articles.append(article_data)
+                        logger.debug(f"   ✅ BeautifulSoup: {len(article_data.get('content', ''))} chars")
                         continue
+                
+                # Method 3: Basic regex (last resort)
                 article_data = self._scrape_basic(url)
                 if article_data:
                     articles.append(article_data)
-            except:
+                    logger.debug(f"   ✅ Basic scrape: {len(article_data.get('content', ''))} chars")
+                else:
+                    logger.debug(f"   ⚠️ Failed to extract content")
+            
+            except Exception as e:
+                logger.debug(f"   ❌ Error: {str(e)[:50]}")
                 continue
-            time.sleep(0.3)
+            
+            time.sleep(0.3)  # Rate limiting
+        
         return articles
     
     def _scrape_with_newspaper(self, url: str) -> Optional[Dict]:
+        """Scrape using newspaper3k library"""
         try:
             article = NewsArticle(url)
             article.download()
             article.parse()
+            
             if len(article.text) < 200:
                 return None
+            
             return {
                 'url': url,
                 'title': article.title or url,
@@ -655,30 +698,55 @@ class ResearchWriter:
             return None
     
     def _scrape_with_bs4(self, url: str) -> Optional[Dict]:
+        """Scrape using BeautifulSoup"""
         try:
             response = self.session.get(url, timeout=15)
+            
             if response.status_code != 200:
                 return None
+            
             soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Extract title
             title = None
-            for selector in ['h1', 'title']:
-                tag = soup.find(selector)
-                if tag:
-                    title = tag.get_text(strip=True)
+            for selector in ['h1', 'title', 'meta[property="og:title"]']:
+                if '[' in selector:
+                    tag = soup.find('meta', property='og:title')
+                    if tag:
+                        title = tag.get('content')
+                else:
+                    tag = soup.find(selector)
+                    if tag:
+                        title = tag.get_text(strip=True)
+                if title:
                     break
+            
+            # Extract content
             content = None
             selectors = [
                 soup.find('article'),
                 soup.find('main'),
-                soup.find(class_=re.compile('content|article|post|entry', re.I))
+                soup.find(class_=re.compile('content|article|post|entry', re.I)),
+                soup.find('div', {'id': re.compile('content|article|post', re.I)})
             ]
+            
             for selector in selectors:
                 if selector:
+                    # Remove unwanted elements
                     for tag in selector.find_all(['script', 'style', 'nav', 'aside', 'footer', 'header']):
                         tag.decompose()
+                    
                     content = selector.get_text(separator=' ', strip=True)
                     if len(content) > 200:
                         break
+            
+            if not content or len(content) < 200:
+                body = soup.find('body')
+                if body:
+                    for tag in body.find_all(['script', 'style', 'nav', 'aside', 'footer', 'header']):
+                        tag.decompose()
+                    content = body.get_text(separator=' ', strip=True)
+            
             if content and len(content) > 200:
                 return {
                     'url': url,
@@ -688,17 +756,23 @@ class ResearchWriter:
                 }
         except:
             pass
+        
         return None
     
     def _scrape_basic(self, url: str) -> Optional[Dict]:
+        """Basic text extraction as last resort"""
         try:
             response = self.session.get(url, timeout=15)
+            
             if response.status_code != 200:
                 return None
+            
+            # Remove HTML tags
             text = re.sub(r'<script[^>]*>.*?</script>', '', response.text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r'<[^>]+>', ' ', text)
             text = ' '.join(text.split())
+            
             if len(text) > 200:
                 return {
                     'url': url,
@@ -708,15 +782,20 @@ class ResearchWriter:
                 }
         except:
             pass
+        
         return None
     
     def _extract_key_points(self, articles: List[Dict], topic: str) -> List[str]:
+        """Extract key points from articles"""
         key_points = []
+        
         for article in articles:
             content = article.get('content', '')
             if not content:
                 continue
+            
             sentences = re.split(r'[.!?]+', content)
+            
             for sentence in sentences:
                 sentence = sentence.strip()
                 if len(sentence.split()) > 5 and len(sentence.split()) < 50:
@@ -724,33 +803,46 @@ class ResearchWriter:
                         key_points.append(sentence)
                         if len(key_points) >= 15:
                             break
+            
             if len(key_points) >= 15:
                 break
+        
         return key_points[:15]
     
     def _extract_facts(self, articles: List[Dict]) -> List[str]:
+        """Extract factual statements from articles"""
         facts = []
+        
         for article in articles:
             content = article.get('content', '')
             sentences = re.split(r'[.!?]+', content)
+            
             for sent in sentences:
                 sent = sent.strip()
                 if len(sent.split()) < 5 or len(sent.split()) > 40:
                     continue
+                
                 has_number = bool(re.search(r'\d+', sent))
                 has_date = bool(re.search(r'\b(20\d{2}|\d{1,2}\s+\w+|\w+\s+\d{1,2})', sent))
                 has_stat = any(word in sent.lower() for word in ['percent', '%', 'million', 'billion', 'thousand'])
+                
                 if has_number or has_date or has_stat:
                     facts.append(sent)
                     if len(facts) >= 10:
                         return facts
+        
         return facts
     
     def _extract_quotes(self, articles: List[Dict]) -> List[Dict]:
+        """Extract quotes from articles"""
         quotes = []
+        
         for article in articles:
             content = article.get('content', '')
+            
+            # Find quoted text
             quote_matches = re.findall(r'["\"\""]([^\"\"\"]{20,200})["\"\""]', content)
+            
             for quote_text in quote_matches:
                 quote_text = quote_text.strip()
                 if len(quote_text.split()) >= 5:
@@ -759,23 +851,35 @@ class ResearchWriter:
                         'source': article.get('title', 'Unknown'),
                         'url': article.get('url', '')
                     })
+                    
                     if len(quotes) >= 5:
                         return quotes
+        
         return quotes
     
     def _generate_article_with_ai(self, topic: str, key_points: List[str], 
                                   articles: List[Dict], target_words: int,
                                   facts: List[str], quotes: List[Dict]) -> str:
+        """
+        🔥 Generate article using AI MODEL
+        Falls back to template if AI unavailable
+        """
         if not self.llm:
             logger.warning("⚠️ AI model not available, using template generation")
             return self._template_article(topic, key_points, articles)
+        
         try:
             research_context = self._prepare_research_context(key_points, articles, facts, quotes)
+            
             writing_styles = [
                 "Write like an experienced researcher with expertise in this field",
                 "Write in a clear, accessible style that educates readers",
+                "Write with authority backed by research and data",
+                "Write comprehensively, exploring multiple perspectives",
             ]
+            
             style_instruction = random.choice(writing_styles)
+            
             prompt = f"""You are a professional researcher and writer. {style_instruction}
 
 Topic: {topic}
@@ -805,7 +909,9 @@ DO NOT:
 Write the article now:
 
 """
+            
             logger.info("⏳ Generating with AI model (60-90 seconds)...")
+            
             generated_text = self.llm(
                 prompt,
                 max_new_tokens=1500,
@@ -815,69 +921,93 @@ Write the article now:
                 stop=["\n\n\n\n", "Article:", "Summary:"],
                 stream=False
             )
+            
             if not generated_text or not isinstance(generated_text, str):
                 generated_text = str(generated_text) if generated_text else ""
+            
             generated_text = generated_text.strip()
+            
             if len(generated_text) < 500:
+                logger.error(f"❌ Generated text too short: {len(generated_text)} chars")
                 return self._template_article(topic, key_points, articles)
+            
             cleaned_text = self._clean_generated_text(generated_text)
             word_count = len(cleaned_text.split())
             logger.info(f"✅ AI generated {word_count} words")
+            
             return cleaned_text
+        
         except Exception as e:
             logger.error(f"❌ AI generation failed: {e}, using template")
             return self._template_article(topic, key_points, articles)
     
     def _prepare_research_context(self, key_points: List[str], articles: List[Dict],
                                   facts: List[str], quotes: List[Dict]) -> str:
+        """Prepare research context summary for AI"""
         context_parts = []
+        
         if key_points:
             context_parts.append("Key Research Findings:")
             for i, point in enumerate(key_points[:8], 1):
                 context_parts.append(f"• {point}")
+        
         if facts:
             context_parts.append("\nKey Facts:")
             for fact in facts[:5]:
                 context_parts.append(f"• {fact}")
+        
         if articles:
             context_parts.append(f"\nBased on {len(articles)} authoritative sources")
+        
         return "\n".join(context_parts)
     
     def _clean_generated_text(self, text: str) -> str:
+        """Clean AI-generated text"""
         unwanted_phrases = [
             "Note: This article", "Disclaimer:", "Generated by", "AI-generated",
             "[This article", "As an AI", "I cannot", "I apologize",
             "In conclusion,", "To summarize,", "In summary:",
         ]
+        
         cleaned = text
+        
         for phrase in unwanted_phrases:
             if phrase in cleaned:
                 pos = cleaned.find(phrase)
                 if pos > 500:
                     cleaned = cleaned[:pos].strip()
                     break
+        
         section_patterns = [
             r'^\s*(?:Introduction|Background|Analysis|Conclusion):\s*',
             r'\n\s*(?:Introduction|Background|Analysis|Conclusion):\s*',
         ]
+        
         for pattern in section_patterns:
             cleaned = re.sub(pattern, '\n\n', cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = cleaned.strip()
+        
         return cleaned
     
     def _template_article(self, topic: str, key_points: List[str], articles: List[Dict]) -> str:
+        """Generate article using template (fallback)"""
         sections = []
+        
         intro = f"""# {topic}
 
 This article explores the key aspects and recent developments in {topic}. Based on research from multiple sources, we examine the most important points and implications.
 
 {topic} has become increasingly important. This analysis draws from current research and expert perspectives."""
+        
         sections.append(intro)
+        
         if key_points:
             sections.append("\n## Key Findings\n")
             for i, point in enumerate(key_points[:8], 1):
                 sections.append(f"{i}. {point}")
+        
         sections.append(f"""
 
 ## Analysis
@@ -893,45 +1023,59 @@ The research indicates several important trends in {topic}:
 
 {topic} represents a significant area of ongoing research. Multiple perspectives exist for understanding this topic. Continued research and collaboration will advance knowledge in this field.
 """)
+        
         return '\n'.join(sections)
     
     def _format_with_citations(self, article: str, articles: List[Dict]) -> str:
+        """Add citations to article"""
         formatted = article
+        
         sources_section = "\n\n## Sources\n\n"
         for i, article_info in enumerate(articles[:10], 1):
             sources_section += f"[{i}] {article_info.get('title', 'Unknown')}: {article_info.get('url', '#')}\n"
+        
         formatted += sources_section
         return formatted
     
     def _calculate_quality_score(self, article: str, articles: List[Dict]) -> float:
+        """Calculate article quality score (0-10)"""
         score = 5.0
+        
         word_count = len(article.split())
         if 800 <= word_count <= 2000:
             score += 1.0
         elif word_count >= 500:
             score += 0.5
+        
         if len(articles) >= 5:
             score += 1.0
         elif len(articles) >= 3:
             score += 0.5
+        
         unique_words = len(set(article.lower().split()))
         if unique_words / word_count > 0.5:
             score += 1.0
+        
         paragraphs = article.count('\n\n')
         if paragraphs >= 5:
             score += 0.5
+        
         has_numbers = bool(re.search(r'\d+', article))
         if has_numbers:
             score += 0.5
+        
         avg_credibility = sum(a.get('credibility', 0.5) for a in articles) / len(articles) if articles else 0.5
         score += avg_credibility * 1.0
+        
         return min(10.0, max(0.0, score))
     
     def save_as_draft(self, topic: str, article: str, db_path: Optional[str] = None) -> bool:
+        """Save article as draft"""
         try:
             db = db_path or self.db_path
             conn = sqlite3.connect(db)
             cursor = conn.cursor()
+            
             cursor.execute('''
                 INSERT INTO ai_drafts 
                 (title, body_draft, summary, source_url, created_date, status)
@@ -944,15 +1088,19 @@ The research indicates several important trends in {topic}:
                 datetime.now(),
                 'research'
             ))
+            
             conn.commit()
             draft_id = cursor.lastrowid
             conn.close()
+            
             logger.info(f"✅ Saved as draft ID: {draft_id}")
             return True
+        
         except Exception as e:
             logger.error(f"Failed to save draft: {e}")
             return False
     
     def clear_cache(self):
+        """Clear article cache"""
         self.article_cache.clear()
         logger.info("Cache cleared")
