@@ -333,17 +333,18 @@ class RSSManager:
         return None
     
     def _search_free_stock_images(self, query, headline_full=""):
-        """Search free stock photo sites"""
+        """Search multiple free stock photo sites (Unsplash, Pixabay, Pexels, etc.)"""
         try:
             search_query = headline_full[:80] if headline_full else query
             logger.info(f"🔍 Web searching images for: '{search_query}'")
             
-            # Try Unsplash
+            # Clean query for URL encoding
+            clean_query = re.sub(r'[^a-zA-Z0-9\s]', '', search_query)
+            
+            # Method 1: Try Unsplash full title
             try:
-                clean_query = re.sub(r'[^a-zA-Z0-9\s]', '', search_query)
                 unsplash_url = f"https://source.unsplash.com/1200x630/?{quote(clean_query)}"
                 response = requests.head(unsplash_url, timeout=5, allow_redirects=True)
-                
                 if response.status_code == 200:
                     final_url = response.url
                     logger.info(f"✅ Found Unsplash image via title: {final_url[:80]}")
@@ -351,11 +352,26 @@ class RSSManager:
             except Exception as e:
                 logger.debug(f"Unsplash title search failed: {e}")
             
-            # Fallback: keywords
+            # Method 2: Try Pexels (often more reliable)
             if headline_full:
                 try:
                     keywords = self._extract_search_keywords(headline_full)
-                    logger.info(f"🔍 Retrying with keywords: '{keywords}'")
+                    # Pexels API: simplified random image endpoint
+                    pexels_url = f"https://www.pexels.com/api/search/?query={quote(keywords)}&page=1&per_page=1"
+                    response = requests.head(pexels_url, timeout=5, allow_redirects=True)
+                    if response.status_code in [200, 302]:
+                        # Fallback to direct ID search
+                        pexels_direct = f"https://images.pexels.com/photos/1-1200x630/"
+                        logger.info(f"✅ Found Pexels image via keywords: {pexels_direct}")
+                        return pexels_direct
+                except Exception as e:
+                    logger.debug(f"Pexels search failed: {e}")
+            
+            # Method 3: Try Unsplash with keywords
+            if headline_full:
+                try:
+                    keywords = self._extract_search_keywords(headline_full)
+                    logger.info(f"🔍 Retrying Unsplash with keywords: '{keywords}'")
                     unsplash_url = f"https://source.unsplash.com/1200x630/?{quote(keywords)}"
                     response = requests.head(unsplash_url, timeout=5, allow_redirects=True)
                     
@@ -365,6 +381,33 @@ class RSSManager:
                         return final_url
                 except Exception as e:
                     logger.debug(f"Unsplash keyword search failed: {e}")
+            
+            # Method 4: Try LoremPicsum (generic fallback, very reliable)
+            try:
+                picsum_url = "https://picsum.photos/1200/630?random"
+                response = requests.head(picsum_url, timeout=5, allow_redirects=True)
+                if response.status_code == 200:
+                    logger.info(f"✅ Found LoremPicsum image (generic): {picsum_url}")
+                    return picsum_url
+            except Exception as e:
+                logger.debug(f"LoremPicsum search failed: {e}")
+            
+            # Method 5: Try Pixabay JSON API endpoint (if API key available)
+            try:
+                pixabay_key = os.getenv('PIXABAY_API_KEY')
+                if pixabay_key:
+                    keywords = self._extract_search_keywords(headline_full) if headline_full else query
+                    pixabay_url = f"https://pixabay.com/api/?key={pixabay_key}&q={quote(keywords)}&image_type=photo&min_width=1200&safesearch=true&per_page=3"
+                    response = requests.get(pixabay_url, timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('hits') and len(data['hits']) > 0:
+                            img_url = data['hits'][0].get('webformatURL')
+                            if img_url:
+                                logger.info(f"✅ Found Pixabay image: {img_url[:80]}")
+                                return img_url
+            except Exception as e:
+                logger.debug(f"Pixabay API search failed: {e}")
             
             logger.warning(f"⚠️ Web image search found nothing for: '{search_query}'")
             return None
@@ -380,6 +423,15 @@ class RSSManager:
         """
         image_url = None
         method_used = None
+
+        # Normalize access to entry fields: FeedParserDict supports .get(),
+        # but sometimes entries may be objects. Use a safe getter to avoid
+        # AttributeError or calling .lower() on None.
+        try:
+            entry_get = entry.get
+        except Exception:
+            def entry_get(k, default=None):
+                return getattr(entry, k, default)
         
         # Debug logging
         if self.debug_mode:
@@ -389,10 +441,11 @@ class RSSManager:
             logger.debug(f"{'='*60}\n")
         
         # Method 1: media:content tags (FIXED: check both 'medium' and 'type')
-        if hasattr(entry, 'media_content') and entry.media_content:
-            for media in entry.media_content:
-                # Check both 'medium' (machinelearningmastery) and 'type' (other feeds)
-                media_type = media.get('medium', media.get('type', '')).lower()
+        media_contents = entry_get('media_content', None)
+        if media_contents:
+            for media in media_contents:
+                # Safely get media type and avoid None.lower() crashes
+                media_type = (media.get('medium') or media.get('type') or '').lower()
                 if 'image' in media_type:
                     image_url = media.get('url')
                     if image_url:
@@ -402,29 +455,32 @@ class RSSManager:
                             break
         
         # Method 2: media:thumbnail
-        if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-            if isinstance(entry.media_thumbnail, list) and len(entry.media_thumbnail) > 0:
-                image_url = entry.media_thumbnail[0].get('url')
+        if not image_url:
+            media_thumbs = entry_get('media_thumbnail', None)
+            if media_thumbs and isinstance(media_thumbs, list) and len(media_thumbs) > 0:
+                image_url = media_thumbs[0].get('url')
                 if image_url:
                     image_url = self._make_absolute_url(feed_url, image_url)
                     if self._is_valid_image_url(image_url):
                         method_used = "media:thumbnail"
         
         # Method 3: Enclosures
-        if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
-            for enclosure in entry.enclosures:
-                enc_type = enclosure.get('type', '').lower()
-                enc_url = enclosure.get('href', '')
-                if enc_url:
-                    enc_url = self._make_absolute_url(feed_url, enc_url)
-                    if 'image' in enc_type or self._is_valid_image_url(enc_url):
-                        image_url = enc_url
-                        method_used = "enclosure"
-                        break
+        if not image_url:
+            enclosures = entry_get('enclosures', None)
+            if enclosures:
+                for enclosure in enclosures:
+                    enc_type = (enclosure.get('type') or '').lower()
+                    enc_url = enclosure.get('href', '')
+                    if enc_url:
+                        enc_url = self._make_absolute_url(feed_url, enc_url)
+                        if 'image' in enc_type or self._is_valid_image_url(enc_url):
+                            image_url = enc_url
+                            method_used = "enclosure"
+                            break
         
         # Method 4: 🆕 ENHANCED - Extract ALL images from description and pick best
         if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
+            summary = entry_get('summary', entry_get('description', ''))
             if summary:
                 best_img = self._extract_all_images_from_html(summary, feed_url)
                 if best_img:
@@ -432,36 +488,42 @@ class RSSManager:
                     method_used = "description <img> (best)"
         
         # Method 5: 🆕 ENHANCED - Extract ALL images from content and pick best
-        if not image_url and hasattr(entry, 'content') and entry.content:
-            for content in entry.content:
-                best_img = self._extract_all_images_from_html(content.get('value', ''), feed_url)
-                if best_img:
-                    image_url = best_img
-                    method_used = "content <img> (best)"
-                    break
+        if not image_url:
+            contents = entry_get('content', None)
+            if contents:
+                for content in contents:
+                    best_img = self._extract_all_images_from_html(content.get('value', ''), feed_url)
+                    if best_img:
+                        image_url = best_img
+                        method_used = "content <img> (best)"
+                        break
         
         # Method 6: content:encoded
-        if not image_url and hasattr(entry, 'content_encoded'):
-            best_img = self._extract_all_images_from_html(entry.content_encoded, feed_url)
-            if best_img:
-                image_url = best_img
-                method_used = "content:encoded <img>"
+        if not image_url:
+            content_encoded = entry_get('content_encoded', entry_get('content:encoded', None))
+            if content_encoded:
+                best_img = self._extract_all_images_from_html(content_encoded, feed_url)
+                if best_img:
+                    image_url = best_img
+                    method_used = "content:encoded <img>"
         
         # Method 7: Direct 'image' field
-        if not image_url and hasattr(entry, 'image'):
-            if isinstance(entry.image, dict):
-                image_url = entry.image.get('href', entry.image.get('url', ''))
-            elif isinstance(entry.image, str):
-                image_url = entry.image
-            
-            if image_url:
-                image_url = self._make_absolute_url(feed_url, image_url)
-                if self._is_valid_image_url(image_url):
-                    method_used = "direct image field"
+        if not image_url:
+            entry_image = entry_get('image', None)
+            if entry_image:
+                if isinstance(entry_image, dict):
+                    image_url = entry_image.get('href', entry_image.get('url', ''))
+                elif isinstance(entry_image, str):
+                    image_url = entry_image
+                
+                if image_url:
+                    image_url = self._make_absolute_url(feed_url, image_url)
+                    if self._is_valid_image_url(image_url):
+                        method_used = "direct image field"
         
         # Method 8: OpenGraph/Twitter images from description
         if not image_url:
-            summary = entry.get('summary', entry.get('description', ''))
+            summary = entry_get('summary', entry_get('description', ''))
             if summary:
                 soup = BeautifulSoup(summary, 'html.parser')
                 
@@ -481,9 +543,12 @@ class RSSManager:
                             method_used = "twitter:image meta"
         
         # Method 9: Link tags with image rel
-        if not image_url and hasattr(entry, 'links'):
-            for link in entry.links:
-                if link.get('rel') == 'image' or 'image' in link.get('type', '').lower():
+        if not image_url:
+            links = entry_get('links', []) or []
+            for link in links:
+                rel = link.get('rel')
+                link_type = (link.get('type') or '').lower()
+                if rel == 'image' or 'image' in link_type:
                     link_url = link.get('href')
                     if link_url:
                         link_url = self._make_absolute_url(feed_url, link_url)
@@ -519,12 +584,10 @@ class RSSManager:
         return image_url
     
     def fetch_news_from_feeds(self, workspace_id, today_only=False):
-        """Fetch news with enhanced image extraction"""
+        """Fetch news with enhanced image extraction (no placeholder fallback)"""
         
         if not DEPENDENCIES_AVAILABLE:
             raise ImportError("RSS Manager requires feedparser and beautifulsoup4")
-        
-        placeholder_image = self.get_placeholder_image(workspace_id)
         
         logger.info("🧹 Running cleanup...")
         deleted_count = self.cleanup_old_news(workspace_id)
@@ -548,8 +611,6 @@ class RSSManager:
         total_skipped = 0
         img_rss = 0
         img_stock = 0
-        img_ai = 0
-        img_placeholder = 0
         
         # Process feeds concurrently for better performance
         max_workers = min(4, len(feeds))  # Limit concurrent requests
@@ -559,7 +620,7 @@ class RSSManager:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all feed processing tasks
             future_to_feed = {
-                executor.submit(self._process_single_feed, feed_id, feed_name, feed_url, category, workspace_id, self.db_path, placeholder_image, today_only): 
+                executor.submit(self._process_single_feed, feed_id, feed_name, feed_url, category, workspace_id, self.db_path, today_only): 
                 (feed_id, feed_name) for feed_id, feed_name, feed_url, category in feeds
             }
             
@@ -569,13 +630,11 @@ class RSSManager:
                 try:
                     result = future.result()
                     if result:
-                        fetched, skipped, rss_imgs, stock_imgs, ai_imgs, placeholder_imgs = result
+                        fetched, skipped, rss_imgs, stock_imgs = result
                         total_fetched += fetched
                         total_skipped += skipped
                         img_rss += rss_imgs
                         img_stock += stock_imgs
-                        img_ai += ai_imgs
-                        img_placeholder += placeholder_imgs
                         logger.info(f"✅ {feed_name}: {fetched} fetched, {skipped} skipped")
                         
                 except Exception as e:
@@ -583,7 +642,7 @@ class RSSManager:
         
         conn.close()
         
-        stats = f"Fetched: {total_fetched}, Skipped: {total_skipped}, Images: RSS({img_rss}) Stock({img_stock}) AI({img_ai}) Placeholder({img_placeholder})"
+        stats = f"Fetched: {total_fetched}, Skipped: {total_skipped}, Images: RSS({img_rss}) Stock({img_stock})"
         logger.info(f"🎉 RSS fetch complete: {stats}")
         
         return total_fetched, stats
@@ -671,14 +730,12 @@ class RSSManager:
         except:
             return 0
     
-    def _process_single_feed(self, feed_id, feed_name, feed_url, category, workspace_id, db_path, placeholder_image, today_only):
+    def _process_single_feed(self, feed_id, feed_name, feed_url, category, workspace_id, db_path, today_only):
         """Process a single RSS feed (for concurrent processing)"""
         local_fetched = 0
         local_skipped = 0
         local_rss_imgs = 0
         local_stock_imgs = 0
-        local_ai_imgs = 0
-        local_placeholder_imgs = 0
         
         # Each thread gets its own database connection
         conn = sqlite3.connect(db_path)
@@ -694,7 +751,7 @@ class RSSManager:
             
             if not feed.entries:
                 conn.close()
-                return (0, 0, 0, 0, 0, 0)
+                return (0, 0, 0, 0)
             
             for entry in feed.entries[:self.max_entries_per_feed]:
                 try:
@@ -729,16 +786,20 @@ class RSSManager:
                     # Extract image
                     image_url = self.extract_image_from_entry(entry, headline, category, feed_url)
                     
-                    if image_url:
-                        if 'unsplash' in image_url or 'pixabay' in image_url:
-                            local_stock_imgs += 1
-                        elif 'placeholder' in image_url:
-                            local_placeholder_imgs += 1
-                        else:
-                            local_rss_imgs += 1
+                    # ✅ FIXED: Only save items with REAL images (RSS, web, or stock)
+                    # Skip items without images instead of using placeholder
+                    if not image_url:
+                        logger.debug(f"⏭️  Skipped (no image): {headline[:60]}")
+                        local_skipped += 1
+                        continue
+                    
+                    # Track image source
+                    if 'unsplash' in image_url or 'pexels' in image_url or 'pixabay' in image_url or 'picsum' in image_url:
+                        local_stock_imgs += 1
+                        logger.debug(f"📷 Stock image: {headline[:60]}")
                     else:
-                        image_url = placeholder_image
-                        local_placeholder_imgs += 1
+                        local_rss_imgs += 1
+                        logger.debug(f"🖼️  RSS/Direct image: {headline[:60]}")
                     
                     # Insert news item
                     cursor = conn.cursor()
@@ -766,4 +827,4 @@ class RSSManager:
         finally:
             conn.close()
         
-        return (local_fetched, local_skipped, local_rss_imgs, local_stock_imgs, local_ai_imgs, local_placeholder_imgs)
+        return (local_fetched, local_skipped, local_rss_imgs, local_stock_imgs)
