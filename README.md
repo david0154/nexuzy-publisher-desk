@@ -544,7 +544,7 @@ Nexuzy Publisher Desk uses **WordPress REST API** for seamless publishing.
 **Nexuzy Tech** - Innovation in AI-powered automation
 
 - 🌐 Website: [Coming Soon]
-- 📧 Contact: [136182039+david0154@users.noreply.github.com](mailto:136182039+david0154@users.noreply.github.com)
+- 📧 Contact: [136182039+david0154@users.noreply.github.com](mailto:david@nexuzy.in)
 - 🐙 GitHub: [@david0154](https://github.com/david0154)
 
 ---
