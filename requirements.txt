@@ -7,6 +7,8 @@ numpy>=1.24.0,<2.0.0
 # Core AI/ML dependencies with version constraints
 transformers>=4.36.0,<4.45.0
 sentence-transformers>=2.2.2,<3.0.0
+langchain>=0.1.0
+langchain-community>=0.0.10
 
 # GGUF model support (CPU-optimized, Pure Python)
 ctransformers>=0.2.27
@@ -24,6 +26,7 @@ requests>=2.31.0
 beautifulsoup4>=4.12.2
 lxml>=4.9.3
 python-dateutil==2.8.2
+html5lib>=1.1
 
 # UI
 pillow>=10.1.0
@@ -48,3 +51,13 @@ ddgs>=0.2.0
 
 # Article scraping
 newspaper3k>=0.2.8
+
+# Optional: For better HTML parsing
+html2text>=2020.1.16
+
+# Wikipedia API
+wikipedia-api>=0.6.0
+
+
+# DuckDuckGo search (alternative)
+duckduckgo-search>=3.9.0
