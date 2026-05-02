@@ -37,16 +37,17 @@ class AIHumanizer:
         text = self._normalize(text)
 
         text = self._remove_formality(text)
+        text = self._remove_ai_thinking_text(text)
         text = self._apply_contractions(text)
-        text = self._inject_human_thoughts(text, intensity)
+        # NOTE: _inject_human_thoughts is intentionally NOT called.
+        # Injecting phrases like "to be honest,", "arguably,", "if you think about it,"
+        # into real news articles corrupts the facts and sounds like AI slop.
         text = self._reshape_sentences(text, intensity)
         text = self._soften_claims(text)
         text = self._vocabulary_variation(text)
         text = self._final_cleanup(text)
 
         metrics = self._analyze(text)
-
-        # Calculate human score based on metrics
         human_score = self._calculate_human_score(metrics, text)
 
         return {
@@ -64,6 +65,34 @@ class AIHumanizer:
     def _normalize(self, text: str) -> str:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
+
+    # -------------------------
+    # STRIP AI THINKING TEXT
+    # -------------------------
+    def _remove_ai_thinking_text(self, text: str) -> str:
+        """
+        Remove any AI "thinking out loud" lines that leak into the output.
+        These appear as the first sentence(s) before the actual article.
+        """
+        thinking_patterns = [
+            r'^Okay,?\s.*?[.\n]',
+            r'^Alright,?\s.*?[.\n]',
+            r'^Sure[,!]?\s.*?[.\n]',
+            r'^Let me\s.*?[.\n]',
+            r'^I need to\s.*?[.\n]',
+            r'^I will\s.*?[.\n]',
+            r'^I\'ll\s.*?[.\n]',
+            r'^Here is\s.*?[.\n]',
+            r'^Here\'s\s.*?[.\n]',
+            r'^The user.*?[.\n]',
+            r'^The task.*?[.\n]',
+            r'^My task.*?[.\n]',
+            r'^As requested.*?[.\n]',
+            r'^Of course[,!]?\s.*?[.\n]',
+        ]
+        for pattern in thinking_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL).strip()
+        return text
 
     # -------------------------
     # FORMALITY REMOVAL
@@ -112,30 +141,13 @@ class AIHumanizer:
         return text
 
     # -------------------------
-    # HUMAN THOUGHT INJECTION
+    # HUMAN THOUGHT INJECTION  ← DISABLED for news articles
+    # DO NOT re-enable. Injecting "to be honest", "arguably", "if you think
+    # about it" etc. into news articles corrupts factual content.
     # -------------------------
     def _inject_human_thoughts(self, text: str, intensity: float) -> str:
-        thoughts = [
-            "to be honest",
-            "in real terms",
-            "at least for now",
-            "in a way",
-            "arguably",
-            "from a practical standpoint",
-            "if you think about it",
-            "for most people"
-        ]
-
-        sentences = re.split(r'(?<=[.!?]) ', text)
-        output = []
-
-        for s in sentences:
-            if random.random() < 0.15 * intensity:
-                s = random.choice(thoughts) + ", " + s.lower()
-                s = s[0].upper() + s[1:]
-            output.append(s)
-
-        return " ".join(output)
+        """DISABLED — injects misleading phrases into factual news content."""
+        return text
 
     # -------------------------
     # SENTENCE SHAPE VARIATION
@@ -181,9 +193,9 @@ class AIHumanizer:
     # -------------------------
     def _vocabulary_variation(self, text: str) -> str:
         swaps = {
-            "important": ["crucial", "worth noting", "meaningful"],
+            "important": ["crucial", "significant", "meaningful"],
             "big": ["significant", "noticeable", "sizable"],
-            "new": ["recent", "updated", "fresh"]
+            "new": ["recent", "fresh", "latest"]
         }
 
         for word, options in swaps.items():
@@ -223,48 +235,27 @@ class AIHumanizer:
         }
 
     def _calculate_human_score(self, metrics: Dict, text: str) -> float:
-        """Calculate human-like score based on metrics"""
-        base_score = 0.85  # Base human score
-
-        # Bonus for high contraction rate (human-like)
-        contraction_bonus = min(metrics["contraction_rate"] / 5.0, 0.10)  # Max 10% bonus
-
-        # Bonus for sentence variance (natural flow)
-        variance_bonus = min(metrics["sentence_variance"] / 5.0, 0.05)  # Max 5% bonus
-
-        # Penalty for too short sentences (robotic)
-        if metrics["avg_sentence_length"] < 10:
-            length_penalty = 0.05
-        else:
-            length_penalty = 0
-
+        base_score = 0.85
+        contraction_bonus = min(metrics["contraction_rate"] / 5.0, 0.10)
+        variance_bonus = min(metrics["sentence_variance"] / 5.0, 0.05)
+        length_penalty = 0.05 if metrics["avg_sentence_length"] < 10 else 0
         human_score = base_score + contraction_bonus + variance_bonus - length_penalty
-        return round(max(min(human_score, 0.98), 0.70), 2)  # Clamp between 70% and 98%
+        return round(max(min(human_score, 0.98), 0.70), 2)
 
     def _get_changes_summary(self, humanized_text: str, original_text: str) -> List[str]:
-        """Generate summary of changes made"""
         changes = []
-
-        # Count contractions
         orig_contractions = sum(1 for word in original_text.split() if "'" in word)
         new_contractions = sum(1 for word in humanized_text.split() if "'" in word)
         if new_contractions > orig_contractions:
             changes.append(f"Added {new_contractions - orig_contractions} contractions")
-
-        # Check for formality removal
         formal_phrases = ["in order to", "due to the fact that", "it is important to note that"]
         formality_removed = any(phrase not in humanized_text and phrase in original_text for phrase in formal_phrases)
         if formality_removed:
             changes.append("Removed formal phrases")
-
-        # Sentence structure changes
         orig_sentences = len(re.split(r'[.!?]', original_text))
         new_sentences = len(re.split(r'[.!?]', humanized_text))
         if abs(new_sentences - orig_sentences) > 0:
             changes.append("Reshaped sentence structure")
-
-        # Vocabulary variation
         if len(humanized_text.split()) > 0:
             changes.append("Applied vocabulary variation")
-
         return changes if changes else ["Applied human-like transformations"]
